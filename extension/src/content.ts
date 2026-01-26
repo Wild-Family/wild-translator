@@ -30,6 +30,15 @@ function createButton() {
     padding: "0"
   } as CSSStyleDeclaration);
 
+  btn.style.setProperty("display", "none", "important");
+  btn.style.setProperty("width", `${BUTTON_SIZE}px`, "important");
+  btn.style.setProperty("height", `${BUTTON_SIZE}px`, "important");
+  btn.style.setProperty("pointer-events", "auto", "important");
+  btn.style.boxSizing = "border-box";
+  btn.style.lineHeight = `${BUTTON_SIZE}px`;
+  btn.style.textAlign = "center";
+  btn.style.userSelect = "none";
+
   btn.addEventListener("mousedown", (e) => {
     // Keep selection when clicking the button.
     e.preventDefault();
@@ -88,7 +97,7 @@ function showButton(rect: DOMRect) {
   const btn = document.getElementById(BUTTON_ID) as HTMLButtonElement | null;
   if (!btn) return;
   positionButton(rect);
-  btn.style.display = "flex";
+  btn.style.setProperty("display", "flex", "important");
 }
 
 function hideButton() {

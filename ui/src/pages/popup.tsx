@@ -30,6 +30,7 @@ export default function PopupPage() {
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const saveTimerRef = useRef<number | null>(null);
+  const moveCaretToEndRef = useRef(false);
 
   useEffect(() => {
     (async () => {
@@ -38,7 +39,21 @@ export default function PopupPage() {
         setPrompts(s.prompts);
         setDefaultPromptId(s.defaultPromptId);
 
-        // Restore last draft from previous popup session.
+        // Prefill from selection draft (set by background/content).
+        try {
+          const store = chrome.storage?.session ?? chrome.storage?.local;
+          const draft = store ? await store.get(["draftText"]) : {};
+          const t = (draft as any)?.draftText;
+          if (typeof t === "string" && t.trim()) {
+            setInputText(t);
+            moveCaretToEndRef.current = true;
+          }
+          if (store) await store.remove(["draftText"]);
+        } catch {
+          // ignore
+        }
+
+        // Restore last draft from previous popup session (if no selection draft).
         try {
           const store = chrome.storage?.local;
           const draft = store ? await store.get(["popupDraft"]) : {};
@@ -60,9 +75,18 @@ export default function PopupPage() {
 
   useEffect(() => {
     if (!loading) {
-      window.requestAnimationFrame(() => inputRef.current?.focus());
+      window.requestAnimationFrame(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.focus();
+        if (moveCaretToEndRef.current) {
+          const end = el.value.length;
+          el.setSelectionRange(end, end);
+          moveCaretToEndRef.current = false;
+        }
+      });
     }
-  }, [loading]);
+  }, [loading, inputText]);
 
   useEffect(() => {
     if (loading) return;
@@ -84,13 +108,30 @@ export default function PopupPage() {
     setOutputText("");
 
     try {
-      const resp: GenerateResponse = await chrome.runtime.sendMessage({
-        type: "GENERATE",
-        inputText,
-        promptId: defaultPromptId
+      const p = chrome.runtime.connect({ name: "wild:generate" });
+      await new Promise<void>((resolve, reject) => {
+        p.onMessage.addListener((m: any) => {
+          if (m?.type === "STREAM_DELTA") setOutputText((t) => t + String(m.delta ?? ""));
+          if (m?.type === "STREAM_ERROR") {
+            try {
+              p.disconnect();
+            } catch {}
+            reject(new Error(String(m.error ?? "Stream error")));
+          }
+          if (m?.type === "STREAM_END") {
+            try {
+              p.disconnect();
+            } catch {}
+            resolve();
+          }
+        });
+
+        p.postMessage({
+          type: "GENERATE_STREAM",
+          inputText,
+          promptId: defaultPromptId
+        });
       });
-      if (!resp.ok) throw new Error(resp.error);
-      setOutputText(resp.text);
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
