@@ -22,6 +22,8 @@ export default function PopupPage() {
   const [busy, setBusy] = useState(false);
   const [stream, setStream] = useState(true);
 
+  const [port, setPort] = useState<chrome.runtime.Port | null>(null);
+
   const selectedPrompt = useMemo(
     () => prompts.find((p) => p.id === defaultPromptId) ?? prompts[0],
     [prompts, defaultPromptId]
@@ -33,12 +35,36 @@ export default function PopupPage() {
         const s = await getAll();
         setPrompts(s.prompts);
         setDefaultPromptId(s.defaultPromptId);
+
+        // Try to prefill from draftText (set by command/context menu).
+        try {
+          const store = chrome.storage?.session ?? chrome.storage?.local;
+          const draft = store ? await store.get(["draftText"]) : {};
+          const t = (draft as any)?.draftText;
+          if (typeof t === "string" && t.trim() && !inputText.trim()) {
+            setInputText(t);
+          }
+          if (store) await store.remove(["draftText"]);
+        } catch {
+          // ignore
+        }
+
+        // Fallback: ask background for current selection.
+        try {
+          const resp: any = await chrome.runtime.sendMessage({ type: "GET_SELECTION" });
+          if (resp?.ok && typeof resp.text === "string" && resp.text.trim() && !inputText.trim()) {
+            setInputText(resp.text);
+          }
+        } catch {
+          // ignore
+        }
       } catch (e: any) {
         setError(e?.message ?? String(e));
       } finally {
         setLoading(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function run() {
@@ -48,22 +74,29 @@ export default function PopupPage() {
 
     try {
       if (stream) {
-        const port = chrome.runtime.connect({ name: "wild:generate" });
+        const p = chrome.runtime.connect({ name: "wild:generate" });
+        setPort(p);
 
         await new Promise<void>((resolve, reject) => {
-          port.onMessage.addListener((m: any) => {
+          p.onMessage.addListener((m: any) => {
             if (m?.type === "STREAM_DELTA") setOutputText((t) => t + String(m.delta ?? ""));
             if (m?.type === "STREAM_ERROR") {
-              port.disconnect();
+              try {
+                p.disconnect();
+              } catch {}
+              setPort(null);
               reject(new Error(String(m.error ?? "Stream error")));
             }
             if (m?.type === "STREAM_END") {
-              port.disconnect();
+              try {
+                p.disconnect();
+              } catch {}
+              setPort(null);
               resolve();
             }
           });
 
-          port.postMessage({
+          p.postMessage({
             type: "GENERATE_STREAM",
             inputText,
             promptId: defaultPromptId
@@ -225,6 +258,18 @@ export default function PopupPage() {
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={run} disabled={busy || !inputText.trim()} style={{ flex: 1 }}>
             {busy ? "Running…" : "Run"}
+          </button>
+          <button
+            onClick={() => {
+              try {
+                port?.disconnect();
+              } catch {}
+              setPort(null);
+              setBusy(false);
+            }}
+            disabled={!busy || !port}
+          >
+            Stop
           </button>
           <button
             onClick={async () => {
