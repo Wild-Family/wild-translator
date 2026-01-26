@@ -1,0 +1,18 @@
+{
+  "name": "@wild/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsup src/background.ts src/content.ts --format esm --target es2022 --outDir dist --sourcemap",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@wild/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.5",
+    "vitest": "^2.1.8"
+  }
+}

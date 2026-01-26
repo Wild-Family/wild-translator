@@ -1,0 +1,15 @@
+{
+  "name": "wild-translator",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm -C ui dev",
+    "build": "pnpm build:all && pnpm dist",
+    "build:all": "pnpm -C shared build && pnpm -C ui build && pnpm -C extension build",
+    "dist": "node scripts/make-dist.mjs",
+    "test": "pnpm -C shared test && pnpm -C extension test",
+    "lint": "pnpm -C ui lint"
+  },
+  "packageManager": "pnpm@10.13.1"
+}

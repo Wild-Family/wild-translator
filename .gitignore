@@ -1,0 +1,28 @@
+# deps
+node_modules/
+ui/node_modules/
+shared/node_modules/
+extension/node_modules/
+
+# pnpm store (usually global, but ignore if local)
+.pnpm-store/
+
+# build outputs
+ui/.next/
+ui/out/
+extension/dist/
+shared/dist/
+extension-dist/
+
+# caches
+.cache/
+.turbo/
+
+# env / secrets
+.env
+.env.*
+
+# misc
+.DS_Store
+*.log
+*.tsbuildinfo
