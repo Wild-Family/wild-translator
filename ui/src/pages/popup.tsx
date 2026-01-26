@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import type { PromptTemplate, ProviderId } from "@wild/shared";
+import { useEffect, useRef, useState } from "react";
+import type { PromptTemplate } from "@wild/shared";
 import { Layout } from "../components/Layout";
 import { getAll, setAll } from "../lib/storage";
 
@@ -7,11 +7,19 @@ type GenerateResponse =
   | { ok: true; text: string }
   | { ok: false; error: string };
 
-function newId() {
-  return `p_${Math.random().toString(16).slice(2)}_${Date.now()}`;
-}
-
 export default function PopupPage() {
+  useEffect(() => {
+    const width = 520;
+    const height = 720;
+    for (const el of [document.documentElement, document.body]) {
+      if (!el) continue;
+      el.style.width = `${width}px`;
+      el.style.minWidth = `${width}px`;
+      el.style.height = `${height}px`;
+      el.style.minHeight = `${height}px`;
+    }
+  }, []);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
@@ -20,14 +28,8 @@ export default function PopupPage() {
   const [inputText, setInputText] = useState("");
   const [outputText, setOutputText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [stream, setStream] = useState(true);
-
-  const [port, setPort] = useState<chrome.runtime.Port | null>(null);
-
-  const selectedPrompt = useMemo(
-    () => prompts.find((p) => p.id === defaultPromptId) ?? prompts[0],
-    [prompts, defaultPromptId]
-  );
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -36,25 +38,14 @@ export default function PopupPage() {
         setPrompts(s.prompts);
         setDefaultPromptId(s.defaultPromptId);
 
-        // Try to prefill from draftText (set by command/context menu).
+        // Restore last draft from previous popup session.
         try {
-          const store = chrome.storage?.session ?? chrome.storage?.local;
-          const draft = store ? await store.get(["draftText"]) : {};
-          const t = (draft as any)?.draftText;
-          if (typeof t === "string" && t.trim() && !inputText.trim()) {
-            setInputText(t);
-          }
-          if (store) await store.remove(["draftText"]);
-        } catch {
-          // ignore
-        }
-
-        // Fallback: ask background for current selection.
-        try {
-          const resp: any = await chrome.runtime.sendMessage({ type: "GET_SELECTION" });
-          if (resp?.ok && typeof resp.text === "string" && resp.text.trim() && !inputText.trim()) {
-            setInputText(resp.text);
-          }
+          const store = chrome.storage?.local;
+          const draft = store ? await store.get(["popupDraft"]) : {};
+          const saved = (draft as any)?.popupDraft as { input?: string; output?: string; promptId?: string } | undefined;
+          if (saved?.input && !inputText.trim()) setInputText(saved.input);
+          if (saved?.output) setOutputText(saved.output);
+          if (saved?.promptId) setDefaultPromptId(saved.promptId);
         } catch {
           // ignore
         }
@@ -67,50 +58,39 @@ export default function PopupPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!loading) {
+      window.requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [loading]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      try {
+        chrome.storage?.local?.set({
+          popupDraft: { input: inputText, output: outputText, promptId: defaultPromptId }
+        });
+      } catch {
+        // ignore
+      }
+    }, 250);
+  }, [inputText, outputText, defaultPromptId, loading]);
+
   async function run() {
     setError(null);
     setBusy(true);
     setOutputText("");
 
     try {
-      if (stream) {
-        const p = chrome.runtime.connect({ name: "wild:generate" });
-        setPort(p);
-
-        await new Promise<void>((resolve, reject) => {
-          p.onMessage.addListener((m: any) => {
-            if (m?.type === "STREAM_DELTA") setOutputText((t) => t + String(m.delta ?? ""));
-            if (m?.type === "STREAM_ERROR") {
-              try {
-                p.disconnect();
-              } catch {}
-              setPort(null);
-              reject(new Error(String(m.error ?? "Stream error")));
-            }
-            if (m?.type === "STREAM_END") {
-              try {
-                p.disconnect();
-              } catch {}
-              setPort(null);
-              resolve();
-            }
-          });
-
-          p.postMessage({
-            type: "GENERATE_STREAM",
-            inputText,
-            promptId: defaultPromptId
-          });
-        });
-      } else {
-        const resp: GenerateResponse = await chrome.runtime.sendMessage({
-          type: "GENERATE",
-          inputText,
-          promptId: defaultPromptId
-        });
-        if (!resp.ok) throw new Error(resp.error);
-        setOutputText(resp.text);
-      }
+      const resp: GenerateResponse = await chrome.runtime.sendMessage({
+        type: "GENERATE",
+        inputText,
+        promptId: defaultPromptId
+      });
+      if (!resp.ok) throw new Error(resp.error);
+      setOutputText(resp.text);
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -118,18 +98,21 @@ export default function PopupPage() {
     }
   }
 
-  async function savePrompts(next: PromptTemplate[], nextDefaultId?: string) {
-    setPrompts(next);
-    setDefaultPromptId(nextDefaultId);
-    await setAll({ prompts: next, defaultPromptId: nextDefaultId });
-  }
-
   if (loading) return <Layout title="Wild Translator">Loading...</Layout>;
 
   return (
     <Layout title="Wild Translator">
       {error && (
-        <div style={{ background: "#fee", border: "1px solid #f99", padding: 8, marginBottom: 8, fontSize: 12 }}>
+        <div
+          style={{
+            background: "#fee",
+            border: "1px solid #f99",
+            color: "#7f1d1d",
+            padding: 8,
+            marginBottom: 8,
+            fontSize: 12
+          }}
+        >
           {error}
         </div>
       )}
@@ -151,142 +134,46 @@ export default function PopupPage() {
           ))}
         </select>
 
-        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
-          <input type="checkbox" checked={stream} onChange={(e) => setStream(e.target.checked)} />
-          Stream
-        </label>
-
-        <button
-          onClick={async () => {
-            const p: PromptTemplate = {
-              id: newId(),
-              name: `Prompt ${prompts.length + 1}`,
-              template: "{{text}}",
-              provider: "openai" satisfies ProviderId
-            };
-            await savePrompts([p, ...prompts], p.id);
-          }}
-        >
-          +
-        </button>
       </div>
-
-      {selectedPrompt && (
-        <details style={{ marginBottom: 8 }}>
-          <summary style={{ cursor: "pointer", fontSize: 12 }}>Edit prompt</summary>
-          <div style={{ marginTop: 6, display: "grid", gap: 6 }}>
-            <label style={{ fontSize: 12 }}>
-              Name
-              <input
-                value={selectedPrompt.name}
-                onChange={async (e) => {
-                  const next = prompts.map((p) => (p.id === selectedPrompt.id ? { ...p, name: e.target.value } : p));
-                  await savePrompts(next, defaultPromptId);
-                }}
-                style={{ width: "100%" }}
-              />
-            </label>
-
-            <label style={{ fontSize: 12 }}>
-              Provider
-              <select
-                value={selectedPrompt.provider ?? "openai"}
-                onChange={async (e) => {
-                  const next = prompts.map((p) =>
-                    p.id === selectedPrompt.id ? { ...p, provider: e.target.value as ProviderId } : p
-                  );
-                  await savePrompts(next, defaultPromptId);
-                }}
-                style={{ width: "100%" }}
-              >
-                <option value="openai">OpenAI</option>
-                <option value="gemini">Gemini</option>
-                <option value="claude">Claude</option>
-              </select>
-            </label>
-
-            <label style={{ fontSize: 12 }}>
-              Model (optional)
-              <input
-                value={selectedPrompt.model ?? ""}
-                onChange={async (e) => {
-                  const v = e.target.value || undefined;
-                  const next = prompts.map((p) => (p.id === selectedPrompt.id ? { ...p, model: v } : p));
-                  await savePrompts(next, defaultPromptId);
-                }}
-                style={{ width: "100%" }}
-              />
-            </label>
-
-            <label style={{ fontSize: 12 }}>
-              Template (use {'{{text}}'})
-              <textarea
-                value={selectedPrompt.template}
-                onChange={async (e) => {
-                  const next = prompts.map((p) =>
-                    p.id === selectedPrompt.id ? { ...p, template: e.target.value } : p
-                  );
-                  await savePrompts(next, defaultPromptId);
-                }}
-                rows={6}
-                style={{ width: "100%" }}
-              />
-            </label>
-
-            <button
-              onClick={async () => {
-                const next = prompts.filter((p) => p.id !== selectedPrompt.id);
-                const nextDefault = next.find((p) => p.id === defaultPromptId)?.id ?? next[0]?.id;
-                await savePrompts(next, nextDefault);
-              }}
-              style={{ background: "#fff", border: "1px solid #f66", color: "#b00" }}
-            >
-              Delete
-            </button>
-          </div>
-        </details>
-      )}
 
       <div style={{ display: "grid", gap: 8 }}>
         <textarea
+          ref={inputRef}
           placeholder="Input"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              if (!busy && inputText.trim()) {
+                void run();
+              }
+            }
+          }}
           rows={7}
           style={{ width: "100%", resize: "vertical" }}
         />
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={run} disabled={busy || !inputText.trim()} style={{ flex: 1 }}>
-            {busy ? "Running…" : "Run"}
-          </button>
-          <button
-            onClick={() => {
-              try {
-                port?.disconnect();
-              } catch {}
-              setPort(null);
-              setBusy(false);
-            }}
-            disabled={!busy || !port}
-          >
-            Stop
-          </button>
-          <button
-            onClick={async () => {
-              await navigator.clipboard.writeText(outputText);
-            }}
-            disabled={!outputText}
-          >
-            Copy
+            {busy ? "Running…" : "Run (Cmd+Enter)"}
           </button>
         </div>
-        <textarea
-          placeholder="Output"
-          value={outputText}
-          readOnly
-          rows={8}
-          style={{ width: "100%", resize: "vertical" }}
-        />
+        <div
+          style={{
+            width: "100%",
+            minHeight: 180,
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            padding: "8px 10px",
+            background: "var(--surface)",
+            whiteSpace: "pre-wrap",
+            fontSize: 13,
+            maxHeight: 280,
+            overflowY: "auto"
+          }}
+        >
+          {outputText || "Output"}
+        </div>
       </div>
     </Layout>
   );

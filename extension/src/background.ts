@@ -11,6 +11,11 @@ type GetSelectionMessage = {
   type: "GET_SELECTION";
 };
 
+type OpenUiWithTextMessage = {
+  type: "OPEN_UI_WITH_TEXT";
+  text: string;
+};
+
 type GenerateResponse =
   | { ok: true; text: string }
   | { ok: false; error: string };
@@ -52,6 +57,19 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
       try {
         const text = await getSelectionTextFromActiveTab();
         sendResponse({ ok: true, text });
+      } catch (e: any) {
+        sendResponse({ ok: false, error: e?.message ?? String(e) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === "OPEN_UI_WITH_TEXT") {
+    (async () => {
+      try {
+        const { text } = msg as OpenUiWithTextMessage;
+        await openUiWithText(text ?? "");
+        sendResponse({ ok: true });
       } catch (e: any) {
         sendResponse({ ok: false, error: e?.message ?? String(e) });
       }
@@ -106,19 +124,28 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.contextMenus.onClicked.addListener(async (info) => {
   if (info.menuItemId !== "wild:open") return;
   const text = info.selectionText ?? (await getSelectionTextFromActiveTab());
-  await setDraftText(text ?? "");
-  const url = chrome.runtime.getURL("ui/popup/index.html");
-  await chrome.tabs.create({ url });
+  await openUiWithText(text ?? "");
 });
 
 chrome.commands.onCommand.addListener(async (command) => {
   if (command !== "open_ui") return;
-  // Popup cannot be reliably opened by command; open a dedicated tab.
   const text = await getSelectionTextFromActiveTab();
   await setDraftText(text ?? "");
-  const url = chrome.runtime.getURL("ui/popup/index.html");
-  await chrome.tabs.create({ url });
+
+  try {
+    // Try to open the action popup (works in MV3 with user gesture).
+    await chrome.action.openPopup();
+  } catch {
+    // Fallback to tab if popup cannot be opened.
+    const url = chrome.runtime.getURL("ui/popup/index.html");
+    await chrome.tabs.create({ url });
+  }
 });
+
+async function openUiWithText(text: string) {
+  await setDraftText(text ?? "");
+  await chrome.action.openPopup();
+}
 
 async function setDraftText(text: string) {
   // storage.session is MV3-only and stays local to the browser profile.
@@ -132,14 +159,28 @@ async function setDraftText(text: string) {
 async function getSelectionTextFromActiveTab(): Promise<string> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return "";
+  const url = tab.url ?? "";
+  if (
+    url.startsWith("chrome://") ||
+    url.startsWith("chrome-extension://") ||
+    url.startsWith("edge://") ||
+    url.startsWith("about:") ||
+    url.startsWith("moz-extension://")
+  ) {
+    return "";
+  }
 
-  const [{ result }] = await chrome.scripting.executeScript<{ result: string }>({
-    target: { tabId: tab.id },
-    func: () => {
-      const sel = window.getSelection?.();
-      return sel?.toString?.() ?? "";
-    }
-  });
+  try {
+    const [{ result }] = await chrome.scripting.executeScript<{ result: string }>({
+      target: { tabId: tab.id },
+      func: () => {
+        const sel = window.getSelection?.();
+        return sel?.toString?.() ?? "";
+      }
+    });
 
-  return typeof result === "string" ? result : "";
+    return typeof result === "string" ? result : "";
+  } catch {
+    return "";
+  }
 }
