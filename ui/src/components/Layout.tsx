@@ -1,7 +1,13 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
-export function Layout({ title, children }: { title: string; children: ReactNode }) {
+export function Layout({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
   const [theme, setTheme] = useState<"light" | "dark">("light");
 
   useEffect(() => {
@@ -27,7 +33,10 @@ export function Layout({ title, children }: { title: string; children: ReactNode
     }
   };
 
-  const themeAriaLabel = useMemo(() => (theme === "dark" ? "Switch to light mode" : "Switch to dark mode"), [theme]);
+  const themeAriaLabel = useMemo(
+    () => (theme === "dark" ? "Switch to light mode" : "Switch to dark mode"),
+    [theme],
+  );
 
   const openSettings = () => {
     const runtime: any = (globalThis as any)?.chrome?.runtime;
@@ -53,10 +62,17 @@ export function Layout({ title, children }: { title: string; children: ReactNode
         minHeight: "100%",
         display: "flex",
         flexDirection: "column",
-        gap: 10
+        gap: 10,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 8,
+        }}
+      >
         <h1 style={{ fontSize: 14, margin: 0 }}>{title}</h1>
         <button
           type="button"
@@ -68,7 +84,7 @@ export function Layout({ title, children }: { title: string; children: ReactNode
             padding: 0,
             color: "var(--accent-strong)",
             textDecoration: "underline",
-            cursor: "pointer"
+            cursor: "pointer",
           }}
         >
           Settings
@@ -81,11 +97,12 @@ export function Layout({ title, children }: { title: string; children: ReactNode
           paddingTop: 8,
           display: "flex",
           justifyContent: "flex-end",
-          alignItems: "center"
+          alignItems: "center",
         }}
       >
         <button
           type="button"
+          className="btn-secondary"
           onClick={toggleTheme}
           aria-label={themeAriaLabel}
           title={themeAriaLabel}

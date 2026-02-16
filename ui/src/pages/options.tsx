@@ -11,7 +11,9 @@ export default function OptionsPage() {
 
   const [apiKeys, setApiKeys] = useState<ApiKeys>({});
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
-  const [defaultPromptId, setDefaultPromptId] = useState<string | undefined>(undefined);
+  const [defaultPromptId, setDefaultPromptId] = useState<string | undefined>(
+    undefined,
+  );
   const [cacheEnabled, setCacheEnabled] = useState(true);
   const [selectionPrefillEnabled, setSelectionPrefillEnabled] = useState(true);
 
@@ -24,12 +26,15 @@ export default function OptionsPage() {
         setDefaultPromptId(s.defaultPromptId);
         try {
           const local = await chrome.storage?.local?.get(["cacheEnabled"]);
-          if (typeof local?.cacheEnabled === "boolean") setCacheEnabled(local.cacheEnabled);
+          if (typeof local?.cacheEnabled === "boolean")
+            setCacheEnabled(local.cacheEnabled);
         } catch {
           // ignore
         }
         try {
-          const local = await chrome.storage?.local?.get(["selectionPrefillEnabled"]);
+          const local = await chrome.storage?.local?.get([
+            "selectionPrefillEnabled",
+          ]);
           if (typeof local?.selectionPrefillEnabled === "boolean") {
             setSelectionPrefillEnabled(local.selectionPrefillEnabled);
           }
@@ -84,7 +89,8 @@ export default function OptionsPage() {
     return `p_${Math.random().toString(16).slice(2)}_${Date.now()}`;
   }
 
-  const selectedPrompt = prompts.find((p) => p.id === defaultPromptId) ?? prompts[0];
+  const selectedPrompt =
+    prompts.find((p) => p.id === defaultPromptId) ?? prompts[0];
 
   const copyShortcutsUrl = async () => {
     try {
@@ -96,7 +102,8 @@ export default function OptionsPage() {
     }
   };
 
-  if (loading) return <Layout title="わいるどぱんち Settings">Loading...</Layout>;
+  if (loading)
+    return <Layout title="わいるどぱんち Settings">Loading...</Layout>;
 
   return (
     <Layout title="わいるどぱんち Settings">
@@ -108,7 +115,7 @@ export default function OptionsPage() {
             color: "#7f1d1d",
             padding: 8,
             marginBottom: 8,
-            fontSize: 12
+            fontSize: 12,
           }}
         >
           {error}
@@ -122,27 +129,37 @@ export default function OptionsPage() {
             color: "#065f46",
             padding: 8,
             marginBottom: 8,
-            fontSize: 12
+            fontSize: 12,
           }}
         >
           {saved}
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 16, borderBottom: "1px solid var(--border)", marginBottom: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 16,
+          borderBottom: "1px solid var(--border)",
+          marginBottom: 12,
+        }}
+      >
         <button
           type="button"
           onClick={() => setTab("keys")}
           style={{
             padding: "8px 2px",
             border: "none",
-            borderBottom: tab === "keys" ? "2px solid var(--text)" : "2px solid transparent",
+            borderBottom:
+              tab === "keys"
+                ? "2px solid var(--text)"
+                : "2px solid transparent",
             background: "transparent",
             color: tab === "keys" ? "var(--text)" : "var(--muted)",
             fontSize: 12,
             fontWeight: tab === "keys" ? 600 : 400,
             cursor: "pointer",
-            borderRadius: 0
+            borderRadius: 0,
           }}
         >
           API Keys
@@ -153,13 +170,16 @@ export default function OptionsPage() {
           style={{
             padding: "8px 2px",
             border: "none",
-            borderBottom: tab === "prompts" ? "2px solid var(--text)" : "2px solid transparent",
+            borderBottom:
+              tab === "prompts"
+                ? "2px solid var(--text)"
+                : "2px solid transparent",
             background: "transparent",
             color: tab === "prompts" ? "var(--text)" : "var(--muted)",
             fontSize: 12,
             fontWeight: tab === "prompts" ? 600 : 400,
             cursor: "pointer",
-            borderRadius: 0
+            borderRadius: 0,
           }}
         >
           Prompts
@@ -170,13 +190,16 @@ export default function OptionsPage() {
           style={{
             padding: "8px 2px",
             border: "none",
-            borderBottom: tab === "shortcuts" ? "2px solid var(--text)" : "2px solid transparent",
+            borderBottom:
+              tab === "shortcuts"
+                ? "2px solid var(--text)"
+                : "2px solid transparent",
             background: "transparent",
             color: tab === "shortcuts" ? "var(--text)" : "var(--muted)",
             fontSize: 12,
             fontWeight: tab === "shortcuts" ? 600 : 400,
             cursor: "pointer",
-            borderRadius: 0
+            borderRadius: 0,
           }}
         >
           Shortcuts
@@ -189,7 +212,9 @@ export default function OptionsPage() {
             OpenAI API Key
             <input
               value={apiKeys.openai ?? ""}
-              onChange={(e) => setApiKeys((k) => ({ ...k, openai: e.target.value }))}
+              onChange={(e) =>
+                setApiKeys((k) => ({ ...k, openai: e.target.value }))
+              }
               style={{ width: "100%" }}
               placeholder="sk-..."
             />
@@ -199,7 +224,9 @@ export default function OptionsPage() {
             Gemini API Key
             <input
               value={apiKeys.gemini ?? ""}
-              onChange={(e) => setApiKeys((k) => ({ ...k, gemini: e.target.value }))}
+              onChange={(e) =>
+                setApiKeys((k) => ({ ...k, gemini: e.target.value }))
+              }
               style={{ width: "100%" }}
               placeholder="AIza..."
             />
@@ -209,7 +236,9 @@ export default function OptionsPage() {
             Claude API Key
             <input
               value={apiKeys.claude ?? ""}
-              onChange={(e) => setApiKeys((k) => ({ ...k, claude: e.target.value }))}
+              onChange={(e) =>
+                setApiKeys((k) => ({ ...k, claude: e.target.value }))
+              }
               style={{ width: "100%" }}
               placeholder="sk-ant-..."
             />
@@ -218,7 +247,14 @@ export default function OptionsPage() {
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button onClick={save}>Save</button>
           </div>
-          <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          <label
+            style={{
+              fontSize: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
             <input
               type="checkbox"
               checked={cacheEnabled}
@@ -226,7 +262,14 @@ export default function OptionsPage() {
             />
             Cache identical inputs
           </label>
-          <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          <label
+            style={{
+              fontSize: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
             <input
               type="checkbox"
               checked={selectionPrefillEnabled}
@@ -235,7 +278,8 @@ export default function OptionsPage() {
             Prefill input with selected text
           </label>
           <p style={{ fontSize: 11, opacity: 0.75, lineHeight: 1.4 }}>
-            Keys are stored in <code>chrome.storage.sync</code> on your browser profile.
+            Keys are stored in <code>chrome.storage.sync</code> on your browser
+            profile.
           </p>
         </div>
       ) : tab === "prompts" ? (
@@ -259,7 +303,7 @@ export default function OptionsPage() {
                   id: newId(),
                   name: `Prompt ${prompts.length + 1}`,
                   template: "{{text}}",
-                  provider: "openai" satisfies ProviderId
+                  provider: "openai" satisfies ProviderId,
                 };
                 await savePrompts([p, ...prompts], p.id);
               }}
@@ -276,7 +320,9 @@ export default function OptionsPage() {
                   value={selectedPrompt.name}
                   onChange={async (e) => {
                     const next = prompts.map((p) =>
-                      p.id === selectedPrompt.id ? { ...p, name: e.target.value } : p
+                      p.id === selectedPrompt.id
+                        ? { ...p, name: e.target.value }
+                        : p,
                     );
                     await savePrompts(next, defaultPromptId);
                   }}
@@ -290,7 +336,9 @@ export default function OptionsPage() {
                   value={selectedPrompt.provider ?? "openai"}
                   onChange={async (e) => {
                     const next = prompts.map((p) =>
-                      p.id === selectedPrompt.id ? { ...p, provider: e.target.value as ProviderId } : p
+                      p.id === selectedPrompt.id
+                        ? { ...p, provider: e.target.value as ProviderId }
+                        : p,
                     );
                     await savePrompts(next, defaultPromptId);
                   }}
@@ -308,7 +356,9 @@ export default function OptionsPage() {
                   value={selectedPrompt.model ?? ""}
                   onChange={async (e) => {
                     const v = e.target.value || undefined;
-                    const next = prompts.map((p) => (p.id === selectedPrompt.id ? { ...p, model: v } : p));
+                    const next = prompts.map((p) =>
+                      p.id === selectedPrompt.id ? { ...p, model: v } : p,
+                    );
                     await savePrompts(next, defaultPromptId);
                   }}
                   style={{ width: "100%" }}
@@ -316,12 +366,30 @@ export default function OptionsPage() {
               </label>
 
               <label style={{ fontSize: 12 }}>
-                Template (use {'{{text}}'})
+                API URL (optional)
+                <input
+                  value={selectedPrompt.apiUrl ?? ""}
+                  onChange={async (e) => {
+                    const v = e.target.value || undefined;
+                    const next = prompts.map((p) =>
+                      p.id === selectedPrompt.id ? { ...p, apiUrl: v } : p,
+                    );
+                    await savePrompts(next, defaultPromptId);
+                  }}
+                  style={{ width: "100%" }}
+                  placeholder="https://your-proxy.example.com"
+                />
+              </label>
+
+              <label style={{ fontSize: 12 }}>
+                Template (use {"{{text}}"})
                 <textarea
                   value={selectedPrompt.template}
                   onChange={async (e) => {
                     const next = prompts.map((p) =>
-                      p.id === selectedPrompt.id ? { ...p, template: e.target.value } : p
+                      p.id === selectedPrompt.id
+                        ? { ...p, template: e.target.value }
+                        : p,
                     );
                     await savePrompts(next, defaultPromptId);
                   }}
@@ -333,9 +401,14 @@ export default function OptionsPage() {
               <div style={{ display: "flex", gap: 8 }}>
                 <button
                   type="button"
+                  className="btn-danger"
                   onClick={async () => {
-                    const next = prompts.filter((p) => p.id !== selectedPrompt.id);
-                    const nextDefault = next.find((p) => p.id === defaultPromptId)?.id ?? next[0]?.id;
+                    const next = prompts.filter(
+                      (p) => p.id !== selectedPrompt.id,
+                    );
+                    const nextDefault =
+                      next.find((p) => p.id === defaultPromptId)?.id ??
+                      next[0]?.id;
                     await savePrompts(next, nextDefault);
                   }}
                 >
@@ -343,16 +416,23 @@ export default function OptionsPage() {
                 </button>
                 <button
                   type="button"
+                  className="btn-secondary"
                   onClick={async () => {
                     if (!selectedPrompt) return;
                     await savePrompts(prompts, selectedPrompt.id);
                   }}
-                  style={{ background: "var(--surface)", color: "var(--text)" }}
                 >
                   Set Default
                 </button>
               </div>
-              <p style={{ fontSize: 11, opacity: 0.75, lineHeight: 1.4, margin: 0 }}>
+              <p
+                style={{
+                  fontSize: 11,
+                  opacity: 0.75,
+                  lineHeight: 1.4,
+                  margin: 0,
+                }}
+              >
                 The default prompt is used by the popup&apos;s Run action.
               </p>
             </div>
@@ -361,12 +441,18 @@ export default function OptionsPage() {
       ) : (
         <div style={{ display: "grid", gap: 10 }}>
           <p style={{ fontSize: 12, lineHeight: 1.5, margin: 0 }}>
-            Chrome blocks extensions from opening <code>chrome://</code> URLs directly.
+            Chrome blocks extensions from opening <code>chrome://</code> URLs
+            directly.
           </p>
           <p style={{ fontSize: 12, lineHeight: 1.5, margin: 0 }}>
-            Open <code>chrome://extensions/shortcuts</code> manually to set the shortcut.
+            Open <code>chrome://extensions/shortcuts</code> manually to set the
+            shortcut.
           </p>
-          <button onClick={copyShortcutsUrl} type="button" style={{ width: "fit-content" }}>
+          <button
+            onClick={copyShortcutsUrl}
+            type="button"
+            style={{ width: "fit-content" }}
+          >
             Copy shortcuts URL
           </button>
         </div>

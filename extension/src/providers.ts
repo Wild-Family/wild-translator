@@ -1,7 +1,9 @@
 import type { GenerateParams, GenerateResult, ProviderId } from "@wild/shared";
 import { renderPromptTemplate } from "@wild/shared";
 
-export async function generate(params: GenerateParams): Promise<GenerateResult> {
+export async function generate(
+  params: GenerateParams,
+): Promise<GenerateResult> {
   switch (params.provider) {
     case "openai":
       return openaiGenerate(params);
@@ -16,7 +18,9 @@ export async function generate(params: GenerateParams): Promise<GenerateResult> 
   }
 }
 
-export async function* generateStream(params: GenerateParams): AsyncGenerator<string> {
+export async function* generateStream(
+  params: GenerateParams,
+): AsyncGenerator<string> {
   switch (params.provider) {
     case "openai":
       yield* openaiGenerateStream(params);
@@ -38,43 +42,63 @@ function buildPrompt(template: string, inputText: string) {
   return renderPromptTemplate(template, { text: inputText });
 }
 
-async function openaiGenerate({ apiKey, model, inputText, template }: GenerateParams): Promise<GenerateResult> {
+async function openaiGenerate({
+  apiKey,
+  model,
+  apiUrl,
+  inputText,
+  template,
+}: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+  const url = apiUrl
+    ? `${apiUrl.replace(/\/+$/, "")}/v1/chat/completions`
+    : "https://api.openai.com/v1/chat/completions";
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model: model ?? "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
-      temperature: 0.2
-    })
+      temperature: 0.2,
+    }),
   });
 
-  if (!res.ok) throw new Error(`OpenAI error: ${res.status} ${await res.text()}`);
+  if (!res.ok)
+    throw new Error(`OpenAI error: ${res.status} ${await res.text()}`);
   const data = (await res.json()) as any;
   const text = data?.choices?.[0]?.message?.content ?? "";
   return { text };
 }
 
-async function* openaiGenerateStream({ apiKey, model, inputText, template }: GenerateParams): AsyncGenerator<string> {
+async function* openaiGenerateStream({
+  apiKey,
+  model,
+  apiUrl,
+  inputText,
+  template,
+}: GenerateParams): AsyncGenerator<string> {
   const prompt = buildPrompt(template, inputText);
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+  const url = apiUrl
+    ? `${apiUrl.replace(/\/+$/, "")}/v1/chat/completions`
+    : "https://api.openai.com/v1/chat/completions";
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model: model ?? "gpt-4o-mini",
       stream: true,
       messages: [{ role: "user", content: prompt }],
-      temperature: 0.2
-    })
+      temperature: 0.2,
+    }),
   });
-  if (!res.ok) throw new Error(`OpenAI error: ${res.status} ${await res.text()}`);
+  if (!res.ok)
+    throw new Error(`OpenAI error: ${res.status} ${await res.text()}`);
   if (!res.body) throw new Error("OpenAI stream: missing response body");
 
   for await (const data of readSseJson(res.body)) {
@@ -84,85 +108,131 @@ async function* openaiGenerateStream({ apiKey, model, inputText, template }: Gen
   }
 }
 
-async function geminiGenerate({ apiKey, model, inputText, template }: GenerateParams): Promise<GenerateResult> {
+async function geminiGenerate({
+  apiKey,
+  model,
+  apiUrl,
+  inputText,
+  template,
+}: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
   const m = model ?? "gemini-1.5-flash";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const base = apiUrl
+    ? apiUrl.replace(/\/+$/, "")
+    : "https://generativelanguage.googleapis.com";
+  const url = `${base}/v1beta/models/${encodeURIComponent(m)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }]
-    })
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    }),
   });
-  if (!res.ok) throw new Error(`Gemini error: ${res.status} ${await res.text()}`);
+  if (!res.ok)
+    throw new Error(`Gemini error: ${res.status} ${await res.text()}`);
   const data = (await res.json()) as any;
-  const text = data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") ?? "";
+  const text =
+    data?.candidates?.[0]?.content?.parts
+      ?.map((p: any) => p?.text ?? "")
+      .join("") ?? "";
   return { text };
 }
 
-async function* geminiGenerateStream({ apiKey, model, inputText, template }: GenerateParams): AsyncGenerator<string> {
+async function* geminiGenerateStream({
+  apiKey,
+  model,
+  apiUrl,
+  inputText,
+  template,
+}: GenerateParams): AsyncGenerator<string> {
   const prompt = buildPrompt(template, inputText);
   const m = model ?? "gemini-1.5-flash";
+  const base = apiUrl
+    ? apiUrl.replace(/\/+$/, "")
+    : "https://generativelanguage.googleapis.com";
   // SSE streaming
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
+  const url = `${base}/v1beta/models/${encodeURIComponent(m)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
 
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }]
-    })
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    }),
   });
-  if (!res.ok) throw new Error(`Gemini error: ${res.status} ${await res.text()}`);
+  if (!res.ok)
+    throw new Error(`Gemini error: ${res.status} ${await res.text()}`);
   if (!res.body) throw new Error("Gemini stream: missing response body");
 
   for await (const data of readSseJson(res.body)) {
-    const text = data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") ?? "";
+    const text =
+      data?.candidates?.[0]?.content?.parts
+        ?.map((p: any) => p?.text ?? "")
+        .join("") ?? "";
     if (text) yield text;
   }
 }
 
-async function claudeGenerate({ apiKey, model, inputText, template }: GenerateParams): Promise<GenerateResult> {
+async function claudeGenerate({
+  apiKey,
+  model,
+  apiUrl,
+  inputText,
+  template,
+}: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01"
-    },
-    body: JSON.stringify({
-      model: model ?? "claude-3-5-sonnet-20241022",
-      max_tokens: 1024,
-      messages: [{ role: "user", content: prompt }]
-    })
-  });
-  if (!res.ok) throw new Error(`Claude error: ${res.status} ${await res.text()}`);
-  const data = (await res.json()) as any;
-  const text = data?.content?.map((c: any) => c?.text ?? "").join("") ?? "";
-  return { text };
-}
-
-async function* claudeGenerateStream({ apiKey, model, inputText, template }: GenerateParams): AsyncGenerator<string> {
-  const prompt = buildPrompt(template, inputText);
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const url = apiUrl
+    ? `${apiUrl.replace(/\/+$/, "")}/v1/messages`
+    : "https://api.anthropic.com/v1/messages";
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
-      Accept: "text/event-stream"
+    },
+    body: JSON.stringify({
+      model: model ?? "claude-3-5-sonnet-20241022",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok)
+    throw new Error(`Claude error: ${res.status} ${await res.text()}`);
+  const data = (await res.json()) as any;
+  const text = data?.content?.map((c: any) => c?.text ?? "").join("") ?? "";
+  return { text };
+}
+
+async function* claudeGenerateStream({
+  apiKey,
+  model,
+  apiUrl,
+  inputText,
+  template,
+}: GenerateParams): AsyncGenerator<string> {
+  const prompt = buildPrompt(template, inputText);
+  const url = apiUrl
+    ? `${apiUrl.replace(/\/+$/, "")}/v1/messages`
+    : "https://api.anthropic.com/v1/messages";
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      Accept: "text/event-stream",
     },
     body: JSON.stringify({
       model: model ?? "claude-3-5-sonnet-20241022",
       max_tokens: 1024,
       stream: true,
-      messages: [{ role: "user", content: prompt }]
-    })
+      messages: [{ role: "user", content: prompt }],
+    }),
   });
-  if (!res.ok) throw new Error(`Claude error: ${res.status} ${await res.text()}`);
+  if (!res.ok)
+    throw new Error(`Claude error: ${res.status} ${await res.text()}`);
   if (!res.body) throw new Error("Claude stream: missing response body");
 
   for await (const evt of readSseEvents(res.body)) {
@@ -174,13 +244,18 @@ async function* claudeGenerateStream({ apiKey, model, inputText, template }: Gen
   }
 }
 
-export function requireApiKey(provider: ProviderId, keys: { openai?: string; gemini?: string; claude?: string }): string {
+export function requireApiKey(
+  provider: ProviderId,
+  keys: { openai?: string; gemini?: string; claude?: string },
+): string {
   const key = keys[provider];
   if (!key) throw new Error(`Missing API key for ${provider}`);
   return key;
 }
 
-async function* readSseJson(body: ReadableStream<Uint8Array>): AsyncGenerator<any> {
+async function* readSseJson(
+  body: ReadableStream<Uint8Array>,
+): AsyncGenerator<any> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
@@ -214,7 +289,9 @@ async function* readSseJson(body: ReadableStream<Uint8Array>): AsyncGenerator<an
 
 type SseEvent = { event?: string; data?: any };
 
-async function* readSseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<SseEvent> {
+async function* readSseEvents(
+  body: ReadableStream<Uint8Array>,
+): AsyncGenerator<SseEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buf = "";

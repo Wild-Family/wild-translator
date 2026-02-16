@@ -46,11 +46,14 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
           provider,
           model: prompt.model,
           template: prompt.template,
-          inputText
+          inputText,
         });
         const cached = await cacheGet(cacheKey);
         if (cached) {
-          sendResponse({ ok: true, text: cached.text } satisfies GenerateResponse);
+          sendResponse({
+            ok: true,
+            text: cached.text,
+          } satisfies GenerateResponse);
           return;
         }
 
@@ -58,14 +61,21 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
           provider,
           apiKey,
           model: prompt.model,
+          apiUrl: prompt.apiUrl,
           inputText,
-          template: prompt.template
+          template: prompt.template,
         });
 
         await cacheSet(cacheKey, result.text);
-        sendResponse({ ok: true, text: result.text } satisfies GenerateResponse);
+        sendResponse({
+          ok: true,
+          text: result.text,
+        } satisfies GenerateResponse);
       } catch (e: any) {
-        sendResponse({ ok: false, error: e?.message ?? String(e) } satisfies GenerateResponse);
+        sendResponse({
+          ok: false,
+          error: e?.message ?? String(e),
+        } satisfies GenerateResponse);
       }
     })();
 
@@ -106,7 +116,11 @@ chrome.runtime.onConnect.addListener((port) => {
 
     (async () => {
       try {
-        const { inputText, promptId } = msg as { type: "GENERATE_STREAM"; inputText: string; promptId?: string };
+        const { inputText, promptId } = msg as {
+          type: "GENERATE_STREAM";
+          inputText: string;
+          promptId?: string;
+        };
         const s = await storage.getAll();
         const pid = promptId ?? s.defaultPromptId ?? s.prompts[0]?.id;
         const prompt = s.prompts.find((p) => p.id === pid) ?? s.prompts[0];
@@ -118,12 +132,13 @@ chrome.runtime.onConnect.addListener((port) => {
           provider,
           model: prompt.model,
           template: prompt.template,
-          inputText
+          inputText,
         });
         const cached = await cacheGet(cacheKey);
         if (cached) {
           port.postMessage({ type: "STREAM_START" });
-          if (cached.text) port.postMessage({ type: "STREAM_DELTA", delta: cached.text });
+          if (cached.text)
+            port.postMessage({ type: "STREAM_DELTA", delta: cached.text });
           port.postMessage({ type: "STREAM_END" });
           return;
         }
@@ -134,8 +149,9 @@ chrome.runtime.onConnect.addListener((port) => {
           provider,
           apiKey,
           model: prompt.model,
+          apiUrl: prompt.apiUrl,
           inputText,
-          template: prompt.template
+          template: prompt.template,
         })) {
           acc += String(delta ?? "");
           port.postMessage({ type: "STREAM_DELTA", delta });
@@ -143,7 +159,10 @@ chrome.runtime.onConnect.addListener((port) => {
         await cacheSet(cacheKey, acc);
         port.postMessage({ type: "STREAM_END" });
       } catch (e: any) {
-        port.postMessage({ type: "STREAM_ERROR", error: e?.message ?? String(e) });
+        port.postMessage({
+          type: "STREAM_ERROR",
+          error: e?.message ?? String(e),
+        });
       }
     })();
   });
@@ -153,7 +172,7 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "wild:open",
     title: "Open わいるどぱんち",
-    contexts: ["page", "selection"]
+    contexts: ["page", "selection"],
   });
 });
 
@@ -207,12 +226,14 @@ async function getSelectionTextFromActiveTab(): Promise<string> {
   }
 
   try {
-    const [{ result }] = await chrome.scripting.executeScript<{ result: string }>({
+    const [{ result }] = await chrome.scripting.executeScript<{
+      result: string;
+    }>({
       target: { tabId: tab.id },
       func: () => {
         const sel = window.getSelection?.();
         return sel?.toString?.() ?? "";
-      }
+      },
     });
 
     return typeof result === "string" ? result : "";
