@@ -20,6 +20,14 @@ type GenerateResponse =
   | { ok: true; text: string }
   | { ok: false; error: string };
 
+type CacheEntry = {
+  text: string;
+  ts: number;
+};
+
+const CACHE_KEY = "wildCache";
+const CACHE_MAX = 50;
+
 chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
   if (!msg?.type) return;
 
@@ -34,6 +42,17 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
 
         const provider = prompt.provider ?? "openai";
         const apiKey = requireApiKey(provider, s.apiKeys);
+        const cacheKey = await buildCacheKey({
+          provider,
+          model: prompt.model,
+          template: prompt.template,
+          inputText
+        });
+        const cached = await cacheGet(cacheKey);
+        if (cached) {
+          sendResponse({ ok: true, text: cached.text } satisfies GenerateResponse);
+          return;
+        }
 
         const result = await generate({
           provider,
@@ -43,6 +62,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
           template: prompt.template
         });
 
+        await cacheSet(cacheKey, result.text);
         sendResponse({ ok: true, text: result.text } satisfies GenerateResponse);
       } catch (e: any) {
         sendResponse({ ok: false, error: e?.message ?? String(e) } satisfies GenerateResponse);
@@ -94,8 +114,22 @@ chrome.runtime.onConnect.addListener((port) => {
 
         const provider = prompt.provider ?? "openai";
         const apiKey = requireApiKey(provider, s.apiKeys);
+        const cacheKey = await buildCacheKey({
+          provider,
+          model: prompt.model,
+          template: prompt.template,
+          inputText
+        });
+        const cached = await cacheGet(cacheKey);
+        if (cached) {
+          port.postMessage({ type: "STREAM_START" });
+          if (cached.text) port.postMessage({ type: "STREAM_DELTA", delta: cached.text });
+          port.postMessage({ type: "STREAM_END" });
+          return;
+        }
 
         port.postMessage({ type: "STREAM_START" });
+        let acc = "";
         for await (const delta of generateStream({
           provider,
           apiKey,
@@ -103,8 +137,10 @@ chrome.runtime.onConnect.addListener((port) => {
           inputText,
           template: prompt.template
         })) {
+          acc += String(delta ?? "");
           port.postMessage({ type: "STREAM_DELTA", delta });
         }
+        await cacheSet(cacheKey, acc);
         port.postMessage({ type: "STREAM_END" });
       } catch (e: any) {
         port.postMessage({ type: "STREAM_ERROR", error: e?.message ?? String(e) });
@@ -116,7 +152,7 @@ chrome.runtime.onConnect.addListener((port) => {
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "wild:open",
-    title: "Open Wild Translator",
+    title: "Open わいるどぱんち",
     contexts: ["page", "selection"]
   });
 });
@@ -183,4 +219,62 @@ async function getSelectionTextFromActiveTab(): Promise<string> {
   } catch {
     return "";
   }
+}
+
+async function buildCacheKey(input: {
+  provider: string;
+  model?: string;
+  template: string;
+  inputText: string;
+}): Promise<string> {
+  const raw = JSON.stringify(input);
+  const data = new TextEncoder().encode(raw);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function cacheGet(key: string): Promise<CacheEntry | null> {
+  try {
+    const enabled = await cacheEnabled();
+    if (!enabled) return null;
+    const store = await chrome.storage.local.get([CACHE_KEY]);
+    const cache = (store?.[CACHE_KEY] ?? {}) as Record<string, CacheEntry>;
+    const hit = cache[key];
+    if (!hit) return null;
+    return hit;
+  } catch {
+    return null;
+  }
+}
+
+async function cacheSet(key: string, text: string): Promise<void> {
+  try {
+    const enabled = await cacheEnabled();
+    if (!enabled) return;
+    const store = await chrome.storage.local.get([CACHE_KEY]);
+    const cache = (store?.[CACHE_KEY] ?? {}) as Record<string, CacheEntry>;
+    cache[key] = { text, ts: Date.now() };
+    const keys = Object.keys(cache);
+    if (keys.length > CACHE_MAX) {
+      keys
+        .sort((a, b) => (cache[a]?.ts ?? 0) - (cache[b]?.ts ?? 0))
+        .slice(0, keys.length - CACHE_MAX)
+        .forEach((k) => delete cache[k]);
+    }
+    await chrome.storage.local.set({ [CACHE_KEY]: cache });
+  } catch {
+    // ignore
+  }
+}
+
+async function cacheEnabled(): Promise<boolean> {
+  try {
+    const store = await chrome.storage.local.get(["cacheEnabled"]);
+    if (typeof store?.cacheEnabled === "boolean") return store.cacheEnabled;
+  } catch {
+    // ignore
+  }
+  return true;
 }

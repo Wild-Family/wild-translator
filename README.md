@@ -1,4 +1,4 @@
-# wild-translator
+# わいるどぱんち
 
 AI translator browser extension (MV3) with a **popup UI**, large input/output areas, customizable prompt presets, and support for **OpenAI / Gemini / Claude**.
 

@@ -31,6 +31,7 @@ export default function PopupPage() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const moveCaretToEndRef = useRef(false);
+  const selectionDraftRef = useRef(false);
 
   useEffect(() => {
     (async () => {
@@ -42,19 +43,27 @@ export default function PopupPage() {
         // Prefill from selection draft (set by background/content).
         try {
           const store = chrome.storage?.session ?? chrome.storage?.local;
-          const draft = store ? await store.get(["draftText"]) : {};
-          const t = (draft as any)?.draftText;
-          if (typeof t === "string" && t.trim()) {
-            setInputText(t);
-            moveCaretToEndRef.current = true;
+          const prefs = await chrome.storage?.local?.get(["selectionPrefillEnabled"]);
+          if (prefs?.selectionPrefillEnabled === false) {
+            if (store) await store.remove(["draftText"]);
+          } else {
+            const draft = store ? await store.get(["draftText"]) : {};
+            const t = (draft as any)?.draftText;
+            if (typeof t === "string") {
+              setInputText(t);
+              setOutputText("");
+              selectionDraftRef.current = true;
+              if (t.trim()) moveCaretToEndRef.current = true;
+            }
+            if (store) await store.remove(["draftText"]);
           }
-          if (store) await store.remove(["draftText"]);
         } catch {
           // ignore
         }
 
         // Restore last draft from previous popup session (if no selection draft).
         try {
+          if (selectionDraftRef.current) return;
           const store = chrome.storage?.local;
           const draft = store ? await store.get(["popupDraft"]) : {};
           const saved = (draft as any)?.popupDraft as { input?: string; output?: string; promptId?: string } | undefined;
@@ -139,10 +148,10 @@ export default function PopupPage() {
     }
   }
 
-  if (loading) return <Layout title="Wild Translator">Loading...</Layout>;
+  if (loading) return <Layout title="わいるどぱんち">Loading...</Layout>;
 
   return (
-    <Layout title="Wild Translator">
+    <Layout title="わいるどぱんち">
       {error && (
         <div
           style={{

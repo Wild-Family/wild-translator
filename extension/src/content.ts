@@ -10,7 +10,7 @@ function createButton() {
   btn.id = BUTTON_ID;
   btn.type = "button";
   btn.textContent = "WT";
-  btn.setAttribute("aria-label", "Open Wild Translator");
+  btn.setAttribute("aria-label", "Open わいるどぱんち");
   Object.assign(btn.style, {
     position: "fixed",
     zIndex: "2147483647",
@@ -56,7 +56,7 @@ function createButton() {
       const resp = await chrome.runtime.sendMessage({ type: "OPEN_UI_WITH_TEXT", text });
       if (!resp?.ok) throw new Error(resp?.error ?? "Failed to open UI");
     } catch (err) {
-      console.warn("Wild Translator: failed to open UI", err);
+      console.warn("わいるどぱんち: failed to open UI", err);
     }
   });
 
@@ -121,6 +121,7 @@ function handleSelection() {
     return;
   }
 
+  lastSelection = text;
   const rect = getSelectionRect();
   if (!rect) {
     scheduleHide();

@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "Wild Translator",
+  "name": "わいるどぱんち",
   "version": "0.1.0",
   "description": "AI translator popup with customizable prompts",
   "action": {
-    "default_title": "Wild Translator",
+    "default_title": "わいるどぱんち",
     "default_popup": "ui/popup/index.html"
   },
   "options_page": "ui/options/index.html",
@@ -20,7 +20,7 @@
         "default": "Ctrl+Shift+Y",
         "mac": "Command+Shift+Y"
       },
-      "description": "Open Wild Translator UI"
+      "description": "Open わいるどぱんち UI"
     }
   },
   "content_scripts": [

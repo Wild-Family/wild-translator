@@ -12,6 +12,8 @@ export default function OptionsPage() {
   const [apiKeys, setApiKeys] = useState<ApiKeys>({});
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
   const [defaultPromptId, setDefaultPromptId] = useState<string | undefined>(undefined);
+  const [cacheEnabled, setCacheEnabled] = useState(true);
+  const [selectionPrefillEnabled, setSelectionPrefillEnabled] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -20,6 +22,20 @@ export default function OptionsPage() {
         setApiKeys(s.apiKeys ?? {});
         setPrompts(s.prompts ?? []);
         setDefaultPromptId(s.defaultPromptId);
+        try {
+          const local = await chrome.storage?.local?.get(["cacheEnabled"]);
+          if (typeof local?.cacheEnabled === "boolean") setCacheEnabled(local.cacheEnabled);
+        } catch {
+          // ignore
+        }
+        try {
+          const local = await chrome.storage?.local?.get(["selectionPrefillEnabled"]);
+          if (typeof local?.selectionPrefillEnabled === "boolean") {
+            setSelectionPrefillEnabled(local.selectionPrefillEnabled);
+          }
+        } catch {
+          // ignore
+        }
       } catch (e: any) {
         setError(e?.message ?? String(e));
       } finally {
@@ -35,6 +51,24 @@ export default function OptionsPage() {
       await setAll({ apiKeys });
       setSaved("Saved.");
       setTimeout(() => setSaved(null), 1500);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    }
+  }
+
+  async function toggleCache(next: boolean) {
+    setCacheEnabled(next);
+    try {
+      await chrome.storage?.local?.set({ cacheEnabled: next });
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    }
+  }
+
+  async function toggleSelectionPrefill(next: boolean) {
+    setSelectionPrefillEnabled(next);
+    try {
+      await chrome.storage?.local?.set({ selectionPrefillEnabled: next });
     } catch (e: any) {
       setError(e?.message ?? String(e));
     }
@@ -62,10 +96,10 @@ export default function OptionsPage() {
     }
   };
 
-  if (loading) return <Layout title="Wild Translator Settings">Loading...</Layout>;
+  if (loading) return <Layout title="わいるどぱんち Settings">Loading...</Layout>;
 
   return (
-    <Layout title="Wild Translator Settings">
+    <Layout title="わいるどぱんち Settings">
       {error && (
         <div
           style={{
@@ -184,6 +218,22 @@ export default function OptionsPage() {
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button onClick={save}>Save</button>
           </div>
+          <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={cacheEnabled}
+              onChange={(e) => toggleCache(e.target.checked)}
+            />
+            Cache identical inputs
+          </label>
+          <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={selectionPrefillEnabled}
+              onChange={(e) => toggleSelectionPrefill(e.target.checked)}
+            />
+            Prefill input with selected text
+          </label>
           <p style={{ fontSize: 11, opacity: 0.75, lineHeight: 1.4 }}>
             Keys are stored in <code>chrome.storage.sync</code> on your browser profile.
           </p>
