@@ -42,6 +42,14 @@ function buildPrompt(template: string, inputText: string) {
   return renderPromptTemplate(template, { text: inputText });
 }
 
+function validateApiUrl(raw: string): string {
+  const url = raw.replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error(`Invalid API URL scheme (must be http or https): ${url}`);
+  }
+  return url;
+}
+
 async function openaiGenerate({
   apiKey,
   model,
@@ -51,7 +59,7 @@ async function openaiGenerate({
 }: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
   const url = apiUrl
-    ? `${apiUrl.replace(/\/+$/, "")}/v1/chat/completions`
+    ? `${validateApiUrl(apiUrl)}/v1/chat/completions`
     : "https://api.openai.com/v1/chat/completions";
   const res = await fetch(url, {
     method: "POST",
@@ -82,7 +90,7 @@ async function* openaiGenerateStream({
 }: GenerateParams): AsyncGenerator<string> {
   const prompt = buildPrompt(template, inputText);
   const url = apiUrl
-    ? `${apiUrl.replace(/\/+$/, "")}/v1/chat/completions`
+    ? `${validateApiUrl(apiUrl)}/v1/chat/completions`
     : "https://api.openai.com/v1/chat/completions";
   const res = await fetch(url, {
     method: "POST",
@@ -118,7 +126,7 @@ async function geminiGenerate({
   const prompt = buildPrompt(template, inputText);
   const m = model ?? "gemini-1.5-flash";
   const base = apiUrl
-    ? apiUrl.replace(/\/+$/, "")
+    ? validateApiUrl(apiUrl)
     : "https://generativelanguage.googleapis.com";
   const url = `${base}/v1beta/models/${encodeURIComponent(m)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
@@ -149,7 +157,7 @@ async function* geminiGenerateStream({
   const prompt = buildPrompt(template, inputText);
   const m = model ?? "gemini-1.5-flash";
   const base = apiUrl
-    ? apiUrl.replace(/\/+$/, "")
+    ? validateApiUrl(apiUrl)
     : "https://generativelanguage.googleapis.com";
   // SSE streaming
   const url = `${base}/v1beta/models/${encodeURIComponent(m)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
@@ -183,7 +191,7 @@ async function claudeGenerate({
 }: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
   const url = apiUrl
-    ? `${apiUrl.replace(/\/+$/, "")}/v1/messages`
+    ? `${validateApiUrl(apiUrl)}/v1/messages`
     : "https://api.anthropic.com/v1/messages";
   const res = await fetch(url, {
     method: "POST",
@@ -214,7 +222,7 @@ async function* claudeGenerateStream({
 }: GenerateParams): AsyncGenerator<string> {
   const prompt = buildPrompt(template, inputText);
   const url = apiUrl
-    ? `${apiUrl.replace(/\/+$/, "")}/v1/messages`
+    ? `${validateApiUrl(apiUrl)}/v1/messages`
     : "https://api.anthropic.com/v1/messages";
   const res = await fetch(url, {
     method: "POST",

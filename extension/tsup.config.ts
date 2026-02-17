@@ -5,7 +5,8 @@ export default defineConfig({
   format: ["esm"],
   target: "es2022",
   outDir: "dist",
-  sourcemap: true,
+  clean: true,
+  sourcemap: false,
   // Bundle @wild/shared so the extension has no bare specifier at runtime.
-  noExternal: ["@wild/shared"]
+  noExternal: ["@wild/shared"],
 });

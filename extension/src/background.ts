@@ -28,7 +28,8 @@ type CacheEntry = {
 const CACHE_KEY = "wildCache";
 const CACHE_MAX = 50;
 
-chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id) return;
   if (!msg?.type) return;
 
   if (msg.type === "GENERATE") {
@@ -109,6 +110,7 @@ chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
 });
 
 chrome.runtime.onConnect.addListener((port) => {
+  if (port.sender?.id !== chrome.runtime.id) return;
   if (port.name !== "wild:generate") return;
 
   port.onMessage.addListener((msg: any) => {

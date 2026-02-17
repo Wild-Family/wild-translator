@@ -211,6 +211,8 @@ export default function OptionsPage() {
           <label style={{ fontSize: 12 }}>
             OpenAI API Key
             <input
+              type="password"
+              autoComplete="off"
               value={apiKeys.openai ?? ""}
               onChange={(e) =>
                 setApiKeys((k) => ({ ...k, openai: e.target.value }))
@@ -223,6 +225,8 @@ export default function OptionsPage() {
           <label style={{ fontSize: 12 }}>
             Gemini API Key
             <input
+              type="password"
+              autoComplete="off"
               value={apiKeys.gemini ?? ""}
               onChange={(e) =>
                 setApiKeys((k) => ({ ...k, gemini: e.target.value }))
@@ -235,6 +239,8 @@ export default function OptionsPage() {
           <label style={{ fontSize: 12 }}>
             Claude API Key
             <input
+              type="password"
+              autoComplete="off"
               value={apiKeys.claude ?? ""}
               onChange={(e) =>
                 setApiKeys((k) => ({ ...k, claude: e.target.value }))
@@ -398,7 +404,17 @@ export default function OptionsPage() {
                 />
               </label>
 
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!selectedPrompt) return;
+                    await savePrompts(prompts, selectedPrompt.id);
+                  }}
+                >
+                  Set Default
+                </button>
+                <div style={{ flex: 1 }} />
                 <button
                   type="button"
                   className="btn-danger"
@@ -413,16 +429,6 @@ export default function OptionsPage() {
                   }}
                 >
                   Delete
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={async () => {
-                    if (!selectedPrompt) return;
-                    await savePrompts(prompts, selectedPrompt.id);
-                  }}
-                >
-                  Set Default
                 </button>
               </div>
               <p
