@@ -240,17 +240,13 @@ export default function PopupPage() {
         />
         <div style={{ display: "flex", gap: 8 }}>
           <button
-            onClick={run}
-            disabled={busy || !inputText.trim()}
+            onClick={busy ? stop : run}
+            disabled={!busy && !inputText.trim()}
+            className={busy ? "btn-danger" : undefined}
             style={{ flex: 1 }}
           >
-            Run (Cmd+Enter)
+            {busy ? "Running… (press again to stop)" : "Run (Cmd+Enter)"}
           </button>
-          {busy && (
-            <button className="btn-danger" onClick={stop}>
-              Stop
-            </button>
-          )}
         </div>
         <div
           style={{
