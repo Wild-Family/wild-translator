@@ -23,12 +23,15 @@ export default function PopupPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
-  const [defaultPromptId, setDefaultPromptId] = useState<string | undefined>(undefined);
+  const [defaultPromptId, setDefaultPromptId] = useState<string | undefined>(
+    undefined,
+  );
 
   const [inputText, setInputText] = useState("");
   const [outputText, setOutputText] = useState("");
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const portRef = useRef<chrome.runtime.Port | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const moveCaretToEndRef = useRef(false);
   const selectionDraftRef = useRef(false);
@@ -43,7 +46,9 @@ export default function PopupPage() {
         // Prefill from selection draft (set by background/content).
         try {
           const store = chrome.storage?.session ?? chrome.storage?.local;
-          const prefs = await chrome.storage?.local?.get(["selectionPrefillEnabled"]);
+          const prefs = await chrome.storage?.local?.get([
+            "selectionPrefillEnabled",
+          ]);
           if (prefs?.selectionPrefillEnabled === false) {
             if (store) await store.remove(["draftText"]);
           } else {
@@ -66,7 +71,9 @@ export default function PopupPage() {
           if (selectionDraftRef.current) return;
           const store = chrome.storage?.local;
           const draft = store ? await store.get(["popupDraft"]) : {};
-          const saved = (draft as any)?.popupDraft as { input?: string; output?: string; promptId?: string } | undefined;
+          const saved = (draft as any)?.popupDraft as
+            | { input?: string; output?: string; promptId?: string }
+            | undefined;
           if (saved?.input && !inputText.trim()) setInputText(saved.input);
           if (saved?.output) setOutputText(saved.output);
           if (saved?.promptId) setDefaultPromptId(saved.promptId);
@@ -103,7 +110,11 @@ export default function PopupPage() {
     saveTimerRef.current = window.setTimeout(() => {
       try {
         chrome.storage?.local?.set({
-          popupDraft: { input: inputText, output: outputText, promptId: defaultPromptId }
+          popupDraft: {
+            input: inputText,
+            output: outputText,
+            promptId: defaultPromptId,
+          },
         });
       } catch {
         // ignore
@@ -118,9 +129,14 @@ export default function PopupPage() {
 
     try {
       const p = chrome.runtime.connect({ name: "wild:generate" });
+      portRef.current = p;
       await new Promise<void>((resolve, reject) => {
+        (p as any).onDisconnect.addListener(() => {
+          resolve();
+        });
         p.onMessage.addListener((m: any) => {
-          if (m?.type === "STREAM_DELTA") setOutputText((t) => t + String(m.delta ?? ""));
+          if (m?.type === "STREAM_DELTA")
+            setOutputText((t) => t + String(m.delta ?? ""));
           if (m?.type === "STREAM_ERROR") {
             try {
               p.disconnect();
@@ -138,14 +154,23 @@ export default function PopupPage() {
         p.postMessage({
           type: "GENERATE_STREAM",
           inputText,
-          promptId: defaultPromptId
+          promptId: defaultPromptId,
         });
       });
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
+      portRef.current = null;
       setBusy(false);
     }
+  }
+
+  function stop() {
+    try {
+      portRef.current?.disconnect();
+    } catch {}
+    portRef.current = null;
+    setBusy(false);
   }
 
   if (loading) return <Layout title="わいるどぱんち">Loading...</Layout>;
@@ -160,14 +185,21 @@ export default function PopupPage() {
             color: "#7f1d1d",
             padding: 8,
             marginBottom: 8,
-            fontSize: 12
+            fontSize: 12,
           }}
         >
           {error}
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          marginBottom: 8,
+          alignItems: "center",
+        }}
+      >
         <select
           value={defaultPromptId}
           onChange={async (e) => {
@@ -183,7 +215,6 @@ export default function PopupPage() {
             </option>
           ))}
         </select>
-
       </div>
 
       <div style={{ display: "grid", gap: 8 }}>
@@ -199,14 +230,27 @@ export default function PopupPage() {
                 void run();
               }
             }
+            if (e.key === "Escape" && busy) {
+              e.preventDefault();
+              stop();
+            }
           }}
           rows={7}
           style={{ width: "100%", resize: "vertical" }}
         />
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={run} disabled={busy || !inputText.trim()} style={{ flex: 1 }}>
-            {busy ? "Running…" : "Run (Cmd+Enter)"}
+          <button
+            onClick={run}
+            disabled={busy || !inputText.trim()}
+            style={{ flex: 1 }}
+          >
+            Run (Cmd+Enter)
           </button>
+          {busy && (
+            <button className="btn-danger" onClick={stop}>
+              Stop
+            </button>
+          )}
         </div>
         <div
           style={{
@@ -219,7 +263,7 @@ export default function PopupPage() {
             whiteSpace: "pre-wrap",
             fontSize: 13,
             maxHeight: 280,
-            overflowY: "auto"
+            overflowY: "auto",
           }}
         >
           {outputText || "Output"}
