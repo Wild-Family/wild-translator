@@ -1,5 +1,9 @@
-import type { GenerateParams, GenerateResult, ProviderId } from "@wild/shared";
-import { renderPromptTemplate } from "@wild/shared";
+import type {
+  GenerateParams,
+  GenerateResult,
+  ProviderId,
+} from "../../shared/src/types.js";
+import { renderPromptTemplate } from "../../shared/src/prompt.js";
 
 export async function generate(
   params: GenerateParams,

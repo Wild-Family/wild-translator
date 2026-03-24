@@ -1,5 +1,5 @@
-import { generate, generateStream, requireApiKey } from "./providers";
-import { storage } from "./storage";
+import { generate, generateStream, requireApiKey } from "./providers.js";
+import { storage } from "./storage.js";
 
 type GenerateMessage = {
   type: "GENERATE";

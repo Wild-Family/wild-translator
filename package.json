@@ -4,12 +4,16 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "pnpm -C ui dev",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "build": "pnpm build:all && pnpm dist",
-    "build:all": "pnpm -C shared build && pnpm -C ui build && pnpm -C extension build",
+    "build:all": "node scripts/build-all.mjs",
     "dist": "node scripts/make-dist.mjs",
-    "test": "pnpm -C shared test && pnpm -C extension test",
-    "lint": "pnpm -C ui lint"
+    "test": "pnpm build:all && node --test shared/test/*.test.mjs extension/test/*.test.mjs",
+    "lint": "pnpm typecheck",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  "packageManager": "pnpm@10.13.1"
+  "packageManager": "pnpm@10.13.1",
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
 }

@@ -5,16 +5,16 @@ AI translator browser extension (MV3) with a **popup UI**, large input/output ar
 ## Dev
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
-This starts the Next.js UI dev server (useful for UI iteration).
+This runs the TypeScript compiler in watch mode.
 
 ## Build extension (unpacked)
 
 ```bash
-npm run build
+pnpm build
 ```
 
 Outputs: `extension-dist/`
@@ -23,6 +23,12 @@ Load it in Chrome:
 - `chrome://extensions`
 - Enable **Developer mode**
 - **Load unpacked** → select `wild-translator/extension-dist`
+
+## Test
+
+```bash
+pnpm test
+```
 
 ## Usage
 - Click the extension icon to open the popup UI

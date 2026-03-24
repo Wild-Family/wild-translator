@@ -8,6 +8,7 @@ extension/node_modules/
 .pnpm-store/
 
 # build outputs
+build/
 ui/.next/
 ui/out/
 extension/dist/
