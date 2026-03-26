@@ -105,10 +105,27 @@ let outputText = "";
 let busy = false;
 let port: chrome.runtime.Port | null = null;
 let saveTimer: number | null = null;
+let runSeq = 0;
+
+type ActiveRun = {
+  token: number;
+  port: chrome.runtime.Port;
+  disconnectExpected: boolean;
+};
+
+let activeRun: ActiveRun | null = null;
 
 function setError(message: string | null): void {
   errorBanner.textContent = message ?? "";
   errorBanner.style.display = message ? "block" : "none";
+}
+
+function resolvePromptId(candidate: string | undefined): string | undefined {
+  if (!prompts.length) return undefined;
+  if (candidate && prompts.some((prompt) => prompt.id === candidate)) {
+    return candidate;
+  }
+  return prompts[0]?.id;
 }
 
 function scheduleDraftSave(): void {
@@ -120,7 +137,7 @@ function scheduleDraftSave(): void {
       popupDraft: {
         input: inputText,
         output: outputText,
-        promptId: defaultPromptId,
+        promptId: resolvePromptId(defaultPromptId),
       },
     });
   }, 250);
@@ -137,6 +154,8 @@ function updateBusy(nextBusy: boolean): void {
 }
 
 function renderPromptOptions(): void {
+  const nextPromptId = resolvePromptId(defaultPromptId);
+  defaultPromptId = nextPromptId;
   promptSelect.replaceChildren();
   for (const prompt of prompts) {
     const option = document.createElement("option");
@@ -144,22 +163,36 @@ function renderPromptOptions(): void {
     option.textContent = prompt.name;
     promptSelect.append(option);
   }
-  if (defaultPromptId) {
-    promptSelect.value = defaultPromptId;
+  if (nextPromptId) {
+    promptSelect.value = nextPromptId;
   }
 }
 
 async function stop(): Promise<void> {
+  const currentRun = activeRun;
+  if (!currentRun) {
+    updateBusy(false);
+    return;
+  }
+
+  currentRun.disconnectExpected = true;
   try {
-    port?.disconnect();
+    currentRun.port.disconnect();
   } catch {
     // ignore
   }
-  port = null;
+
+  if (activeRun?.token === currentRun.token) {
+    activeRun = null;
+    port = null;
+  }
   updateBusy(false);
 }
 
 async function run(): Promise<void> {
+  const token = ++runSeq;
+  const nextPromptId = resolvePromptId(defaultPromptId);
+
   setError(null);
   updateBusy(true);
   outputText = "";
@@ -169,47 +202,79 @@ async function run(): Promise<void> {
   try {
     const nextPort = chrome.runtime.connect({ name: "wild:generate" });
     port = nextPort;
+    const runState: ActiveRun = {
+      token,
+      port: nextPort,
+      disconnectExpected: false,
+    };
+    activeRun = runState;
 
     await new Promise<void>((resolve, reject) => {
+      let settled = false;
+
+      const settle = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        fn();
+      };
+
       nextPort.onDisconnect.addListener(() => {
-        resolve();
+        if (settled) return;
+        if (runState.disconnectExpected) {
+          settle(resolve);
+          return;
+        }
+        settle(() => {
+          reject(new Error("Generation disconnected unexpectedly."));
+        });
       });
 
       nextPort.onMessage.addListener((message: any) => {
+        if (settled) return;
         if (message?.type === "STREAM_DELTA") {
+          if (activeRun?.token !== token) return;
           outputText += String(message.delta ?? "");
           updateOutput();
           scheduleDraftSave();
         }
         if (message?.type === "STREAM_ERROR") {
+          runState.disconnectExpected = true;
           try {
             nextPort.disconnect();
           } catch {
             // ignore
           }
-          reject(new Error(String(message.error ?? "Stream error")));
+          settle(() => {
+            reject(new Error(String(message.error ?? "Stream error")));
+          });
         }
         if (message?.type === "STREAM_END") {
+          runState.disconnectExpected = true;
           try {
             nextPort.disconnect();
           } catch {
             // ignore
           }
-          resolve();
+          settle(resolve);
         }
       });
 
       nextPort.postMessage({
         type: "GENERATE_STREAM",
         inputText,
-        promptId: defaultPromptId,
+        promptId: nextPromptId,
       });
     });
   } catch (error) {
-    setError(error instanceof Error ? error.message : String(error));
+    if (activeRun?.token === token) {
+      setError(error instanceof Error ? error.message : String(error));
+    }
   } finally {
-    port = null;
-    updateBusy(false);
+    if (activeRun?.token === token) {
+      activeRun = null;
+      port = null;
+      updateBusy(false);
+    }
   }
 }
 
@@ -252,16 +317,23 @@ async function initialize(): Promise<void> {
   try {
     const state = await getAll();
     prompts = state.prompts;
-    defaultPromptId = state.defaultPromptId;
+    defaultPromptId = resolvePromptId(state.defaultPromptId);
     renderPromptOptions();
 
     try {
       const store = chrome.storage?.session ?? chrome.storage?.local;
       const prefs = await chrome.storage?.local?.get(["selectionPrefillEnabled"]);
-      if (prefs?.selectionPrefillEnabled === false) {
+      const selectionPrefillEnabled = prefs?.selectionPrefillEnabled !== false;
+      let hasSelectionDraft = false;
+
+      if (!selectionPrefillEnabled) {
         await store?.remove(["draftText"]);
       } else {
         const draft = store ? await store.get(["draftText"]) : {};
+        hasSelectionDraft = Object.prototype.hasOwnProperty.call(
+          draft,
+          "draftText",
+        );
         const text = draft?.draftText;
         if (typeof text === "string") {
           inputText = text;
@@ -277,14 +349,10 @@ async function initialize(): Promise<void> {
         }
         await store?.remove(["draftText"]);
       }
-    } catch {
-      // ignore
-    }
 
-    try {
-      if (!inputText.trim()) {
-        const draft = await chrome.storage?.local?.get(["popupDraft"]);
-        const saved = draft?.popupDraft;
+      if (!hasSelectionDraft && !inputText.trim()) {
+        const savedDraft = await chrome.storage?.local?.get(["popupDraft"]);
+        const saved = savedDraft?.popupDraft;
         if (saved?.input) {
           inputText = saved.input;
           input.value = saved.input;
@@ -293,7 +361,7 @@ async function initialize(): Promise<void> {
           outputText = saved.output;
         }
         if (saved?.promptId) {
-          defaultPromptId = saved.promptId;
+          defaultPromptId = resolvePromptId(saved.promptId);
         }
       }
     } catch {

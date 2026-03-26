@@ -9,7 +9,15 @@ pnpm install
 pnpm dev
 ```
 
-This runs the TypeScript compiler in watch mode.
+`pnpm dev` now runs `tsc --watch` only. It typechecks and keeps the sources compiling, but it does not start a UI server or refresh `extension-dist/`.
+
+For a full rebuild of the unpacked extension, run:
+
+```bash
+pnpm build
+```
+
+For test runs, `pnpm test` first rebuilds the project and then executes the Node standard test suite.
 
 ## Build extension (unpacked)
 

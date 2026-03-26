@@ -8,11 +8,14 @@
     "build": "pnpm build:all && pnpm dist",
     "build:all": "node scripts/build-all.mjs",
     "dist": "node scripts/make-dist.mjs",
-    "test": "pnpm build:all && node --test shared/test/*.test.mjs extension/test/*.test.mjs",
+    "test": "pnpm build && node --test test/*.test.mjs shared/test/*.test.mjs extension/test/*.test.mjs",
     "lint": "pnpm typecheck",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "packageManager": "pnpm@10.13.1",
+  "engines": {
+    "node": ">=20"
+  },
   "devDependencies": {
     "typescript": "^5.9.3"
   }

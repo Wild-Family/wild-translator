@@ -188,7 +188,15 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (command !== "open_ui") return;
   const text = await getSelectionTextFromActiveTab();
   await setDraftText(text ?? "");
+  await openPopupOrTab();
+});
 
+async function openUiWithText(text: string) {
+  await setDraftText(text ?? "");
+  await openPopupOrTab();
+}
+
+async function openPopupOrTab() {
   try {
     // Try to open the action popup (works in MV3 with user gesture).
     await chrome.action.openPopup();
@@ -197,11 +205,6 @@ chrome.commands.onCommand.addListener(async (command) => {
     const url = chrome.runtime.getURL("ui/popup/index.html");
     await chrome.tabs.create({ url });
   }
-});
-
-async function openUiWithText(text: string) {
-  await setDraftText(text ?? "");
-  await chrome.action.openPopup();
 }
 
 async function setDraftText(text: string) {

@@ -113,8 +113,40 @@ function persistPrompts(): Promise<void> {
   });
 }
 
-function getSelectedPrompt(): PromptTemplate | undefined {
-  return state.prompts.find((prompt) => prompt.id === state.selectedPromptId);
+function getPromptById(id: string | undefined): PromptTemplate | undefined {
+  if (!id) return undefined;
+  return state.prompts.find((prompt) => prompt.id === id);
+}
+
+function resolveSelectedPrompt(): PromptTemplate | undefined {
+  const resolved =
+    getPromptById(state.selectedPromptId) ??
+    getPromptById(state.defaultPromptId) ??
+    state.prompts[0];
+
+  if (!resolved) return undefined;
+
+  if (state.selectedPromptId !== resolved.id) {
+    state.selectedPromptId = resolved.id;
+  }
+
+  if (!getPromptById(state.defaultPromptId)) {
+    state.defaultPromptId = resolved.id;
+    void setAll({ defaultPromptId: resolved.id });
+  }
+
+  return resolved;
+}
+
+async function savePromptPatch(
+  promptId: string,
+  patch: (prompt: PromptTemplate) => PromptTemplate,
+): Promise<void> {
+  state.prompts = state.prompts.map((prompt) =>
+    prompt.id === promptId ? patch(prompt) : prompt,
+  );
+
+  await persistPrompts();
 }
 
 function createTabButton(tab: TabId, label: string): HTMLButtonElement {
@@ -319,42 +351,26 @@ function renderPromptsTab(): void {
   toolbar.append(select, addButton);
   grid.append(toolbar);
 
-  const selectedPrompt = getSelectedPrompt();
+  const selectedPrompt = resolveSelectedPrompt();
   if (!selectedPrompt) {
     content.append(grid);
     return;
   }
   const selectedPromptId = selectedPrompt.id;
+  select.value = selectedPromptId;
 
   const editor = el("div");
   setStyles(editor, { display: "grid", gap: "8px" });
 
-  async function updatePrompt(
-    recipe: (prompt: PromptTemplate) => PromptTemplate,
-  ): Promise<void> {
-    state.prompts = state.prompts.map((prompt) =>
-      prompt.id === selectedPromptId ? recipe(prompt) : prompt,
-    );
-
-    try {
-      await persistPrompts();
-      renderPromptsTab();
-    } catch (error) {
-      showError(error instanceof Error ? error.message : String(error));
-    }
-  }
-
   const nameInput = document.createElement("input");
   nameInput.value = selectedPrompt.name;
   nameInput.addEventListener("input", () => {
-    state.prompts = state.prompts.map((prompt) =>
-      prompt.id === selectedPromptId
-        ? { ...prompt, name: nameInput.value }
-        : prompt,
-    );
-  });
-  nameInput.addEventListener("change", () => {
-    void updatePrompt((prompt) => ({ ...prompt, name: nameInput.value }));
+    void savePromptPatch(selectedPromptId, (prompt) => ({
+      ...prompt,
+      name: nameInput.value,
+    })).catch((error) => {
+      showError(error instanceof Error ? error.message : String(error));
+    });
   });
 
   const providerSelect = document.createElement("select");
@@ -365,35 +381,49 @@ function renderPromptsTab(): void {
   ].join("");
   providerSelect.value = selectedPrompt.provider ?? "openai";
   providerSelect.addEventListener("change", () => {
-    void updatePrompt((prompt) => ({
+    void savePromptPatch(selectedPromptId, (prompt) => ({
       ...prompt,
       provider: providerSelect.value as ProviderId,
-    }));
+    })).catch((error) => {
+      showError(error instanceof Error ? error.message : String(error));
+    });
   });
 
   const modelInput = document.createElement("input");
   modelInput.value = selectedPrompt.model ?? "";
-  modelInput.addEventListener("change", () => {
+  modelInput.addEventListener("input", () => {
     const value = modelInput.value || undefined;
-    void updatePrompt((prompt) => ({ ...prompt, model: value }));
+    void savePromptPatch(selectedPromptId, (prompt) => ({
+      ...prompt,
+      model: value,
+    })).catch((error) => {
+      showError(error instanceof Error ? error.message : String(error));
+    });
   });
 
   const apiUrlInput = document.createElement("input");
   apiUrlInput.placeholder = "https://your-proxy.example.com";
   apiUrlInput.value = selectedPrompt.apiUrl ?? "";
-  apiUrlInput.addEventListener("change", () => {
+  apiUrlInput.addEventListener("input", () => {
     const value = apiUrlInput.value || undefined;
-    void updatePrompt((prompt) => ({ ...prompt, apiUrl: value }));
+    void savePromptPatch(selectedPromptId, (prompt) => ({
+      ...prompt,
+      apiUrl: value,
+    })).catch((error) => {
+      showError(error instanceof Error ? error.message : String(error));
+    });
   });
 
   const templateInput = document.createElement("textarea");
   templateInput.rows = 6;
   templateInput.value = selectedPrompt.template;
-  templateInput.addEventListener("change", () => {
-    void updatePrompt((prompt) => ({
+  templateInput.addEventListener("input", () => {
+    void savePromptPatch(selectedPromptId, (prompt) => ({
       ...prompt,
       template: templateInput.value,
-    }));
+    })).catch((error) => {
+      showError(error instanceof Error ? error.message : String(error));
+    });
   });
 
   const buttons = el("div");
@@ -513,8 +543,11 @@ async function initialize(): Promise<void> {
     const stored = await getAll();
     state.apiKeys = stored.apiKeys ?? {};
     state.prompts = stored.prompts ?? [];
-    state.defaultPromptId = stored.defaultPromptId;
-    state.selectedPromptId = stored.defaultPromptId ?? stored.prompts[0]?.id;
+    const firstPromptId = state.prompts[0]?.id;
+    const normalizedDefault =
+      getPromptById(stored.defaultPromptId)?.id ?? firstPromptId;
+    state.defaultPromptId = normalizedDefault;
+    state.selectedPromptId = normalizedDefault;
 
     try {
       const local = await chrome.storage?.local?.get(["cacheEnabled"]);

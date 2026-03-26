@@ -87,7 +87,7 @@ export function createLayout(
   }
 
   const content = el("div");
-  setStyles(content, { flex: "1" });
+  setStyles(content, { flex: "1", minHeight: "0", overflowY: "auto" });
 
   const footer = el("div");
   setStyles(footer, {
@@ -104,8 +104,10 @@ export function createLayout(
   footer.append(themeButton);
 
   let theme: "light" | "dark" = "light";
+  let themeTouched = false;
 
   themeButton.addEventListener("click", async () => {
+    themeTouched = true;
     theme = theme === "dark" ? "light" : "dark";
     applyTheme(theme, themeButton);
     try {
@@ -116,6 +118,7 @@ export function createLayout(
   });
 
   void getTheme().then((nextTheme) => {
+    if (themeTouched) return;
     theme = nextTheme;
     applyTheme(theme, themeButton);
   });
