@@ -6,8 +6,33 @@
     <title>わいるどぱんち</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
-    <div id="app"></div>
+  <body data-page="home">
+    <div class="wt-home">
+      <main class="wt-home__card">
+        <p class="wt-home__eyebrow">Chrome extension</p>
+        <h1 class="wt-home__title">わいるどぱんち</h1>
+        <p class="wt-home__lede">
+          Pure TypeScript popup and options UI with a static shared shell.
+        </p>
+        <nav class="wt-home__actions" aria-label="Open pages">
+          <a class="wt-home__button" href="./popup/index.html">Open Popup UI</a>
+          <a class="wt-home__button wt-home__button--secondary" href="./options/index.html">
+            Open Settings
+          </a>
+        </nav>
+      </main>
+      <footer class="wt-home__footer">
+        <button
+          id="theme-toggle"
+          class="btn-secondary wt-home__theme"
+          type="button"
+          aria-label="Switch to dark mode"
+          title="Switch to dark mode"
+        >
+          🌙
+        </button>
+      </footer>
+    </div>
     <script type="module" src="./src/index.js"></script>
   </body>
 </html>

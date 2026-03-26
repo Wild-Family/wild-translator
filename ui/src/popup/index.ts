@@ -1,6 +1,4 @@
 import type { PromptTemplate } from "../app/models.js";
-import { el, setStyles } from "../app/dom.js";
-import { createLayout } from "../app/layout.js";
 import { getAll, setAll } from "../app/storage.js";
 
 function stripMarkdown(text: string): string {
@@ -18,94 +16,33 @@ function stripMarkdown(text: string): string {
     .replace(/\[(.+?)\]\(.+?\)/g, "$1");
 }
 
-function applyPopupWindowSize(): void {
-  const width = 520;
-  const height = 720;
-  for (const node of [document.documentElement, document.body]) {
-    if (!node) continue;
-    node.style.width = `${width}px`;
-    node.style.minWidth = `${width}px`;
-    node.style.height = `${height}px`;
-    node.style.minHeight = `${height}px`;
+function requireElement<T extends HTMLElement>(id: string): T {
+  const node = document.getElementById(id);
+  if (!node) {
+    throw new Error(`Missing #${id} element`);
   }
+  return node as T;
 }
 
-const root = document.getElementById("app");
-
-if (!root) {
-  throw new Error("Missing #app root");
-}
-
-applyPopupWindowSize();
-
-const layout = createLayout(root, { title: "わいるどぱんち" });
-const shell = el("div");
-setStyles(shell, { display: "grid", gap: "8px" });
-
-const loading = el("div", { text: "Loading..." });
-const errorBanner = el("div");
-setStyles(errorBanner, {
-  display: "none",
-  background: "#fee",
-  border: "1px solid #f99",
-  color: "#7f1d1d",
-  padding: "8px",
-  marginBottom: "8px",
-  fontSize: "12px",
-});
-
-const toolbar = el("div");
-setStyles(toolbar, {
-  display: "flex",
-  gap: "8px",
-  marginBottom: "8px",
-  alignItems: "center",
-});
-
-const promptSelect = document.createElement("select");
-setStyles(promptSelect, { flex: "1" });
-
-const form = el("div");
-setStyles(form, { display: "grid", gap: "8px" });
-
-const input = document.createElement("textarea");
-input.placeholder = "Input";
-input.rows = 7;
-setStyles(input, { width: "100%", resize: "vertical" });
-
-const actions = el("div");
-setStyles(actions, { display: "flex", gap: "8px" });
-
-const runButton = document.createElement("button");
-runButton.type = "button";
-runButton.textContent = "Run";
-
-const output = el("div", { text: "Output" });
-setStyles(output, {
-  border: "1px solid var(--border)",
-  background: "var(--surface)",
-  borderRadius: "8px",
-  padding: "10px",
-  minHeight: "220px",
-  whiteSpace: "pre-wrap",
-  lineHeight: "1.5",
-  overflowY: "auto",
-});
-
-actions.append(runButton);
-toolbar.append(promptSelect);
-form.append(input, actions, output);
-shell.append(errorBanner, toolbar, form);
-layout.content.append(loading);
+const loading = requireElement<HTMLDivElement>("popup-loading");
+const main = requireElement<HTMLElement>("popup-shell");
+const errorBanner = requireElement<HTMLDivElement>("popup-error");
+const promptSelect = requireElement<HTMLSelectElement>("popup-prompt-select");
+const input = requireElement<HTMLTextAreaElement>("popup-input");
+const runButton = requireElement<HTMLButtonElement>("popup-run");
+const output = requireElement<HTMLDivElement>("popup-output");
+const settingsButton = requireElement<HTMLButtonElement>("popup-settings");
+const themeButton = requireElement<HTMLButtonElement>("popup-theme");
 
 let prompts: PromptTemplate[] = [];
 let defaultPromptId: string | undefined;
 let inputText = "";
 let outputText = "";
 let busy = false;
-let port: chrome.runtime.Port | null = null;
 let saveTimer: number | null = null;
 let runSeq = 0;
+let themeTouched = false;
+let theme: "light" | "dark" = "light";
 
 type ActiveRun = {
   token: number;
@@ -117,7 +54,7 @@ let activeRun: ActiveRun | null = null;
 
 function setError(message: string | null): void {
   errorBanner.textContent = message ?? "";
-  errorBanner.style.display = message ? "block" : "none";
+  errorBanner.hidden = !message;
 }
 
 function resolvePromptId(candidate: string | undefined): string | undefined {
@@ -126,6 +63,23 @@ function resolvePromptId(candidate: string | undefined): string | undefined {
     return candidate;
   }
   return prompts[0]?.id;
+}
+
+function renderPromptOptions(): void {
+  defaultPromptId = resolvePromptId(defaultPromptId);
+  promptSelect.replaceChildren();
+
+  const fragment = document.createDocumentFragment();
+  for (const prompt of prompts) {
+    const option = document.createElement("option");
+    option.value = prompt.id;
+    option.textContent = prompt.name;
+    fragment.append(option);
+  }
+
+  promptSelect.append(fragment);
+  promptSelect.value = defaultPromptId ?? "";
+  promptSelect.disabled = prompts.length === 0;
 }
 
 function scheduleDraftSave(): void {
@@ -150,21 +104,38 @@ function updateOutput(): void {
 function updateBusy(nextBusy: boolean): void {
   busy = nextBusy;
   runButton.textContent = nextBusy ? "Stop" : "Run";
-  runButton.className = nextBusy ? "btn-danger" : "";
+  runButton.classList.toggle("btn-danger", nextBusy);
 }
 
-function renderPromptOptions(): void {
-  const nextPromptId = resolvePromptId(defaultPromptId);
-  defaultPromptId = nextPromptId;
-  promptSelect.replaceChildren();
-  for (const prompt of prompts) {
-    const option = document.createElement("option");
-    option.value = prompt.id;
-    option.textContent = prompt.name;
-    promptSelect.append(option);
+function applyTheme(nextTheme: "light" | "dark"): void {
+  theme = nextTheme;
+  document.documentElement.dataset.theme = nextTheme;
+  themeButton.textContent = nextTheme === "dark" ? "🌞" : "🌙";
+  const label =
+    nextTheme === "dark" ? "Switch to light mode" : "Switch to dark mode";
+  themeButton.setAttribute("aria-label", label);
+  themeButton.title = label;
+}
+
+async function getTheme(): Promise<"light" | "dark"> {
+  try {
+    const result = await chrome.storage?.local?.get(["uiTheme"]);
+    return result?.uiTheme === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
   }
-  if (nextPromptId) {
-    promptSelect.value = nextPromptId;
+}
+
+function openSettingsPage(): void {
+  const runtime = chrome?.runtime;
+  if (runtime?.openOptionsPage) {
+    runtime.openOptionsPage();
+    return;
+  }
+
+  const url = runtime?.getURL?.("ui/options/index.html");
+  if (url) {
+    window.open(url, "_blank", "noopener");
   }
 }
 
@@ -184,7 +155,6 @@ async function stop(): Promise<void> {
 
   if (activeRun?.token === currentRun.token) {
     activeRun = null;
-    port = null;
   }
   updateBusy(false);
 }
@@ -201,7 +171,6 @@ async function run(): Promise<void> {
 
   try {
     const nextPort = chrome.runtime.connect({ name: "wild:generate" });
-    port = nextPort;
     const runState: ActiveRun = {
       token,
       port: nextPort,
@@ -272,14 +241,14 @@ async function run(): Promise<void> {
   } finally {
     if (activeRun?.token === token) {
       activeRun = null;
-      port = null;
       updateBusy(false);
     }
   }
 }
 
 promptSelect.addEventListener("change", () => {
-  defaultPromptId = promptSelect.value || undefined;
+  defaultPromptId = resolvePromptId(promptSelect.value || undefined);
+  promptSelect.value = defaultPromptId ?? "";
   scheduleDraftSave();
   void setAll({ defaultPromptId });
 });
@@ -310,6 +279,21 @@ runButton.addEventListener("click", () => {
   }
   if (inputText.trim()) {
     void run();
+  }
+});
+
+settingsButton.addEventListener("click", () => {
+  openSettingsPage();
+});
+
+themeButton.addEventListener("click", async () => {
+  themeTouched = true;
+  const nextTheme = theme === "dark" ? "light" : "dark";
+  applyTheme(nextTheme);
+  try {
+    await chrome.storage?.local?.set({ uiTheme: nextTheme });
+  } catch {
+    // ignore
   }
 });
 
@@ -370,7 +354,12 @@ async function initialize(): Promise<void> {
 
     renderPromptOptions();
     updateOutput();
-    loading.replaceWith(shell);
+    const nextTheme = await getTheme();
+    if (!themeTouched) {
+      applyTheme(nextTheme);
+    }
+    loading.hidden = true;
+    main.classList.remove("is-hidden");
 
     window.requestAnimationFrame(() => {
       input.focus();
@@ -379,7 +368,7 @@ async function initialize(): Promise<void> {
       }
     });
   } catch (error) {
-    loading.replaceWith(shell);
+    loading.hidden = true;
     setError(error instanceof Error ? error.message : String(error));
   }
 }

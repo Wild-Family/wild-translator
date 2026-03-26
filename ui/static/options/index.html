@@ -5,9 +5,337 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>わいるどぱんち Settings</title>
     <link rel="stylesheet" href="../styles.css" />
+    <style>
+      #app.wt-app {
+        padding: 12px;
+        width: 520px;
+        min-width: 520px;
+        height: 100%;
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .wt-shell {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-height: 100%;
+      }
+
+      .wt-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+      }
+
+      .wt-title {
+        font-size: 14px;
+        margin: 0;
+      }
+
+      .wt-tab-bar {
+        display: flex;
+        gap: 16px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 12px;
+      }
+
+      .wt-tab-button {
+        padding: 8px 2px;
+        border: none;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 400;
+        cursor: pointer;
+        border-radius: 0;
+      }
+
+      .wt-tab-button[aria-selected="true"] {
+        border-bottom-color: var(--text);
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .wt-loading {
+        font-size: 12px;
+        color: var(--muted);
+        padding: 6px 0;
+      }
+
+      .wt-banner {
+        padding: 8px;
+        margin-bottom: 8px;
+        font-size: 12px;
+      }
+
+      .wt-banner-error {
+        background: #fee;
+        border: 1px solid #f99;
+        color: #7f1d1d;
+      }
+
+      .wt-banner-saved {
+        background: #efe;
+        border: 1px solid #9f9;
+        color: #065f46;
+      }
+
+      .wt-panel {
+        display: grid;
+        gap: 10px;
+      }
+
+      .wt-grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .wt-label {
+        font-size: 12px;
+        display: grid;
+        gap: 4px;
+      }
+
+      .wt-inline {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+      }
+
+      .wt-note {
+        font-size: 11px;
+        opacity: 0.75;
+        line-height: 1.4;
+        margin: 0;
+      }
+
+      .wt-buttons {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .wt-spacer {
+        flex: 1;
+      }
+
+      .wt-footer {
+        border-top: 1px solid var(--border);
+        padding-top: 8px;
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+      }
+
+      .wt-theme-button {
+        padding: 6px 10px;
+        font-size: 14px;
+      }
+
+      .wt-panel[hidden] {
+        display: none;
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app" class="wt-app">
+      <div class="wt-shell">
+        <header class="wt-header">
+          <h1 class="wt-title">わいるどぱんち Settings</h1>
+          <div aria-hidden="true"></div>
+        </header>
+
+        <div
+          id="error-banner"
+          class="wt-banner wt-banner-error"
+          role="status"
+          aria-live="polite"
+          hidden
+        ></div>
+        <div
+          id="saved-banner"
+          class="wt-banner wt-banner-saved"
+          role="status"
+          aria-live="polite"
+          hidden
+        ></div>
+        <div id="loading" class="wt-loading">Loading...</div>
+
+        <nav id="tab-bar" class="wt-tab-bar" aria-label="Settings sections">
+          <button
+            id="tab-keys"
+            class="wt-tab-button"
+            type="button"
+            data-tab="keys"
+            aria-selected="true"
+          >
+            API Keys
+          </button>
+          <button
+            id="tab-prompts"
+            class="wt-tab-button"
+            type="button"
+            data-tab="prompts"
+            aria-selected="false"
+          >
+            Prompts
+          </button>
+          <button
+            id="tab-shortcuts"
+            class="wt-tab-button"
+            type="button"
+            data-tab="shortcuts"
+            aria-selected="false"
+          >
+            Shortcuts
+          </button>
+        </nav>
+
+        <main id="content" style="flex: 1; min-height: 0; overflow-y: auto;" hidden>
+          <section id="keys-tab" class="wt-panel" data-tab-panel="keys">
+            <div class="wt-grid">
+              <label class="wt-label">
+                OpenAI API Key
+                <input
+                  id="openai-api-key"
+                  type="password"
+                  autocomplete="off"
+                  placeholder="sk-..."
+                />
+              </label>
+              <label class="wt-label">
+                Gemini API Key
+                <input
+                  id="gemini-api-key"
+                  type="password"
+                  autocomplete="off"
+                  placeholder="AIza..."
+                />
+              </label>
+              <label class="wt-label">
+                Claude API Key
+                <input
+                  id="claude-api-key"
+                  type="password"
+                  autocomplete="off"
+                  placeholder="sk-ant-..."
+                />
+              </label>
+
+              <div class="wt-buttons">
+                <button id="keys-save" type="button">Save</button>
+              </div>
+
+              <label class="wt-inline">
+                <input id="cache-enabled" type="checkbox" />
+                Cache identical inputs
+              </label>
+              <label class="wt-inline">
+                <input id="selection-prefill-enabled" type="checkbox" />
+                Prefill input with selected text
+              </label>
+
+              <p class="wt-note">
+                Keys are stored in <code>chrome.storage.sync</code> on your browser
+                profile.
+              </p>
+            </div>
+          </section>
+
+          <section
+            id="prompts-tab"
+            class="wt-panel"
+            data-tab-panel="prompts"
+            hidden
+          >
+            <div class="wt-grid">
+              <div class="wt-inline">
+                <select id="prompt-select" style="flex: 1;"></select>
+                <button id="prompt-add" type="button">Add</button>
+              </div>
+
+              <p id="prompt-empty" class="wt-note" hidden>
+                No prompts configured yet. Add one to start editing.
+              </p>
+
+              <div id="prompt-editor" class="wt-grid">
+                <label class="wt-label">
+                  Name
+                  <input id="prompt-name" type="text" />
+                </label>
+                <label class="wt-label">
+                  Provider
+                  <select id="prompt-provider">
+                    <option value="openai">OpenAI</option>
+                    <option value="gemini">Gemini</option>
+                    <option value="claude">Claude</option>
+                  </select>
+                </label>
+                <label class="wt-label">
+                  Model (optional)
+                  <input id="prompt-model" type="text" />
+                </label>
+                <label class="wt-label">
+                  API URL (optional)
+                  <input
+                    id="prompt-api-url"
+                    type="url"
+                    placeholder="https://your-proxy.example.com"
+                  />
+                </label>
+                <label class="wt-label">
+                  Template (use {{text}})
+                  <textarea id="prompt-template" rows="6"></textarea>
+                </label>
+
+                <div class="wt-buttons">
+                  <button id="prompt-set-default" type="button">Set Default</button>
+                  <div class="wt-spacer"></div>
+                  <button id="prompt-delete" type="button" class="btn-danger">
+                    Delete
+                  </button>
+                </div>
+
+                <p class="wt-note">
+                  The default prompt is used by the popup's Run action.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section
+            id="shortcuts-tab"
+            class="wt-panel"
+            data-tab-panel="shortcuts"
+            hidden
+          >
+            <div class="wt-grid">
+              <p class="wt-note">
+                Chrome blocks extensions from opening <code>chrome://</code> URLs
+                directly.
+              </p>
+              <p class="wt-note">
+                Open <code>chrome://extensions/shortcuts</code> manually to set the
+                shortcut.
+              </p>
+              <button id="copy-shortcuts-url" type="button" style="width: fit-content;">
+                Copy shortcuts URL
+              </button>
+            </div>
+          </section>
+        </main>
+
+        <footer class="wt-footer">
+          <button id="theme-button" class="btn-secondary wt-theme-button" type="button"></button>
+        </footer>
+      </div>
+    </div>
     <script type="module" src="../src/options/index.js"></script>
   </body>
 </html>
