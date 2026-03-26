@@ -11,7 +11,7 @@
   "permissions": ["storage", "activeTab", "scripting", "contextMenus"],
   "host_permissions": ["<all_urls>"],
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "extension/src/background.js",
     "type": "module"
   },
   "commands": {
@@ -26,7 +26,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "js": ["extension/src/content.js"],
       "run_at": "document_idle"
     }
   ]

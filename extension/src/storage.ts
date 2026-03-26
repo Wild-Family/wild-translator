@@ -1,4 +1,4 @@
-import type { ApiKeys, PromptTemplate } from "@wild/shared";
+import type { ApiKeys, PromptTemplate } from "../../shared/src/types.js";
 
 export type StorageShape = {
   apiKeys: ApiKeys;
@@ -13,10 +13,10 @@ const DEFAULTS: StorageShape = {
       id: "default-translate",
       name: "Translate",
       template: "Translate the following text to Japanese:\n\n{{text}}",
-      provider: "openai"
-    }
+      provider: "openai",
+    },
   ],
-  defaultPromptId: "default-translate"
+  defaultPromptId: "default-translate",
 };
 
 export const storage = {
@@ -25,11 +25,12 @@ export const storage = {
     return {
       apiKeys: (raw.apiKeys ?? DEFAULTS.apiKeys) as ApiKeys,
       prompts: (raw.prompts ?? DEFAULTS.prompts) as PromptTemplate[],
-      defaultPromptId: (raw.defaultPromptId ?? DEFAULTS.defaultPromptId) as string
+      defaultPromptId: (raw.defaultPromptId ??
+        DEFAULTS.defaultPromptId) as string,
     };
   },
 
   async setAll(next: Partial<StorageShape>): Promise<void> {
     await chrome.storage.sync.set(next);
-  }
+  },
 };
