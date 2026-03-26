@@ -5,9 +5,196 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>わいるどぱんち</title>
     <link rel="stylesheet" href="../styles.css" />
+    <style>
+      html,
+      body,
+      #app {
+        height: 100%;
+      }
+
+      body {
+        overflow: hidden;
+      }
+
+      #app {
+        display: flex;
+      }
+
+      .popup-root {
+        width: 520px;
+        min-width: 520px;
+        height: 100%;
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 12px;
+      }
+
+      .popup-header,
+      .popup-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .popup-header {
+        margin-bottom: 8px;
+      }
+
+      .popup-title {
+        margin: 0;
+        font-size: 14px;
+      }
+
+      .popup-settings {
+        font-size: 12px;
+        background: none;
+        border: none;
+        padding: 0;
+        color: var(--accent-strong);
+        text-decoration: underline;
+        cursor: pointer;
+      }
+
+      .popup-error {
+        background: #fee;
+        border: 1px solid #f99;
+        color: #7f1d1d;
+        padding: 8px;
+        margin-bottom: 8px;
+        font-size: 12px;
+      }
+
+      .popup-error[hidden] {
+        display: none;
+      }
+
+      .popup-loading {
+        flex: 1;
+      }
+
+      .popup-main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .popup-toolbar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+        align-items: center;
+      }
+
+      .popup-prompt {
+        flex: 1;
+      }
+
+      .popup-form {
+        display: grid;
+        gap: 8px;
+        flex: 1;
+      }
+
+      .popup-input {
+        width: 100%;
+        resize: vertical;
+      }
+
+      .popup-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .popup-output {
+        border: 1px solid var(--border);
+        background: var(--surface);
+        border-radius: 8px;
+        padding: 10px;
+        min-height: 220px;
+        white-space: pre-wrap;
+        line-height: 1.5;
+        overflow-y: auto;
+      }
+
+      .popup-theme {
+        padding: 6px 10px;
+        font-size: 14px;
+      }
+
+      .is-hidden {
+        display: none !important;
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="popup-root">
+        <header class="popup-header">
+          <h1 class="popup-title">わいるどぱんち</h1>
+          <button
+            id="popup-settings"
+            class="popup-settings"
+            type="button"
+          >
+            Settings
+          </button>
+        </header>
+
+        <div
+          id="popup-error"
+          class="popup-error"
+          hidden
+          role="alert"
+          aria-live="polite"
+        ></div>
+
+        <div id="popup-loading" class="popup-loading">Loading...</div>
+
+        <section
+          id="popup-shell"
+          class="popup-main is-hidden"
+          aria-label="Popup translator"
+        >
+          <div class="popup-toolbar">
+            <select
+              id="popup-prompt-select"
+              class="popup-prompt"
+              aria-label="Prompt preset"
+            ></select>
+          </div>
+
+          <div class="popup-form">
+            <textarea
+              id="popup-input"
+              class="popup-input"
+              placeholder="Input"
+              rows="7"
+            ></textarea>
+
+            <div class="popup-actions">
+              <button id="popup-run" type="button">Run</button>
+            </div>
+
+            <div id="popup-output" class="popup-output">Output</div>
+          </div>
+        </section>
+
+        <footer class="popup-footer">
+          <button
+            id="popup-theme"
+            type="button"
+            class="btn-secondary popup-theme"
+            aria-label="Switch to dark mode"
+            title="Switch to dark mode"
+          >
+            🌙
+          </button>
+        </footer>
+      </div>
+    </div>
     <script type="module" src="../src/popup/index.js"></script>
   </body>
 </html>

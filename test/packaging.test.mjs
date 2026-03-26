@@ -56,7 +56,13 @@ test("packaged layout matches manifest and static HTML references", async () => 
     "utf8",
   );
   assert.match(indexHtml, /<link rel="stylesheet" href="\.\/styles\.css" \/>/);
-  assert.match(indexHtml, /<script type="module" src="\.\/src\/index\.js"><\/script>/);
+  assert.match(
+    indexHtml,
+    /<script type="module" src="\.\/src\/index\.js"><\/script>/,
+  );
+  assert.match(indexHtml, /id="theme-toggle"/);
+  assert.match(indexHtml, /href="\.\/popup\/index\.html"/);
+  assert.match(indexHtml, /href="\.\/options\/index\.html"/);
 
   const popupHtml = await readFile(
     path.join(distDir, "ui/popup/index.html"),
@@ -67,6 +73,15 @@ test("packaged layout matches manifest and static HTML references", async () => 
     popupHtml,
     /<script type="module" src="\.\.\/src\/popup\/index\.js"><\/script>/,
   );
+  assert.match(popupHtml, /id="popup-settings"/);
+  assert.match(popupHtml, /id="popup-theme"/);
+  assert.match(popupHtml, /id="popup-loading"/);
+  assert.match(popupHtml, /id="popup-shell"/);
+  assert.match(popupHtml, /id="popup-error"/);
+  assert.match(popupHtml, /id="popup-prompt-select"/);
+  assert.match(popupHtml, /id="popup-input"/);
+  assert.match(popupHtml, /id="popup-run"/);
+  assert.match(popupHtml, /id="popup-output"/);
 
   const optionsHtml = await readFile(
     path.join(distDir, "ui/options/index.html"),
@@ -77,4 +92,12 @@ test("packaged layout matches manifest and static HTML references", async () => 
     optionsHtml,
     /<script type="module" src="\.\.\/src\/options\/index\.js"><\/script>/,
   );
+  assert.match(optionsHtml, /id="loading"/);
+  assert.match(optionsHtml, /id="content"/);
+  assert.match(optionsHtml, /id="error-banner"/);
+  assert.match(optionsHtml, /id="saved-banner"/);
+  assert.match(optionsHtml, /id="prompt-select"/);
+  assert.match(optionsHtml, /id="prompt-name"/);
+  assert.match(optionsHtml, /id="prompt-template"/);
+  assert.match(optionsHtml, /id="theme-button"/);
 });
