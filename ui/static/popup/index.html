@@ -104,7 +104,8 @@
       }
 
       .popup-form {
-        display: grid;
+        display: flex;
+        flex-direction: column;
         gap: 4px;
         flex: 1;
         min-height: 0;
@@ -128,6 +129,7 @@
       }
 
       .popup-output {
+        flex: 1;
         border: 1px solid var(--border);
         background: var(--surface);
         border-radius: 8px;
@@ -135,6 +137,7 @@
         min-height: 220px;
         white-space: pre-wrap;
         line-height: 1.5;
+        overflow-y: auto;
         overflow-wrap: anywhere;
       }
 
