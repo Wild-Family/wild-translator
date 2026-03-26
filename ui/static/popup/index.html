@@ -116,15 +116,10 @@
         resize: vertical;
       }
 
-      .popup-actions {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        justify-content: center;
-      }
-
       #popup-run {
+        display: block;
         width: 100%;
+        margin-block: 2rem;
         padding: 8px 16px;
       }
 
@@ -196,9 +191,7 @@
               rows="7"
             ></textarea>
 
-            <div class="popup-actions">
-              <button id="popup-run" type="button">Run</button>
-            </div>
+            <button id="popup-run" type="button">Run</button>
 
             <div id="popup-output" class="popup-output">Output</div>
           </div>
