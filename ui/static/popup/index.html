@@ -35,6 +35,7 @@
         min-height: 100%;
         display: flex;
         flex-direction: column;
+        min-height: 0;
         gap: 10px;
         padding: 12px;
       }
@@ -86,7 +87,9 @@
         flex: 1;
         display: flex;
         flex-direction: column;
+        min-height: 0;
         gap: 8px;
+        overflow-y: auto;
       }
 
       .popup-toolbar {
@@ -104,6 +107,7 @@
         display: grid;
         gap: 8px;
         flex: 1;
+        min-height: 0;
       }
 
       .popup-input {
@@ -114,6 +118,12 @@
       .popup-actions {
         display: flex;
         gap: 8px;
+        align-items: center;
+      }
+
+      #popup-run {
+        width: fit-content;
+        min-width: 88px;
       }
 
       .popup-output {
@@ -124,7 +134,7 @@
         min-height: 220px;
         white-space: pre-wrap;
         line-height: 1.5;
-        overflow-y: auto;
+        overflow-wrap: anywhere;
       }
 
       .popup-theme {
