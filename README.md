@@ -38,6 +38,21 @@ Load it in Chrome:
 pnpm test
 ```
 
+## Release
+
+GitHub Releases are created by `.github/workflows/release.yml`.
+
+1. Update both `package.json` and `extension/static/manifest.json` to the same numeric version.
+2. Run `pnpm release:verify` and `pnpm test`.
+3. Create and push a matching tag:
+
+```bash
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+The workflow builds `extension-dist/`, uploads `release/wild-punch-vX.Y.Z.zip` with `manifest.json` at the zip root, and attaches `release/SHA256SUMS` to the GitHub Release. Manual runs are also supported through **Actions → Release** with an existing `vX.Y.Z` tag. Reruns fail if that GitHub Release already exists; delete the existing release first when intentionally recreating it.
+
 ## Usage
 - Click the extension icon to open the popup UI
 - Set API keys in **Settings** (options page)

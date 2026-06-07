@@ -8,6 +8,8 @@
     "build": "pnpm build:all && pnpm dist",
     "build:all": "node scripts/build-all.mjs",
     "dist": "node scripts/make-dist.mjs",
+    "release:package": "node scripts/package-extension.mjs",
+    "release:verify": "node scripts/verify-release-version.mjs",
     "test": "pnpm build && node --test test/*.test.mjs shared/test/*.test.mjs extension/test/*.test.mjs",
     "lint": "pnpm typecheck",
     "typecheck": "tsc -p tsconfig.json --noEmit"
