@@ -16,6 +16,11 @@ type OpenUiWithTextMessage = {
   text: string;
 };
 
+type OpenUiWindowWithTextMessage = {
+  type: "OPEN_UI_WINDOW_WITH_TEXT";
+  text: string;
+};
+
 type GenerateResponse =
   | { ok: true; text: string }
   | { ok: false; error: string };
@@ -100,6 +105,20 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
       try {
         const { text } = msg as OpenUiWithTextMessage;
         await openUiWithText(text ?? "");
+        sendResponse({ ok: true });
+      } catch (e: any) {
+        sendResponse({ ok: false, error: e?.message ?? String(e) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === "OPEN_UI_WINDOW_WITH_TEXT") {
+    (async () => {
+      try {
+        const { text } = msg as OpenUiWindowWithTextMessage;
+        await setDraftText(text ?? "");
+        await openPopupWindowOrTab();
         sendResponse({ ok: true });
       } catch (e: any) {
         sendResponse({ ok: false, error: e?.message ?? String(e) });
@@ -203,6 +222,20 @@ async function openPopupOrTab() {
   } catch {
     // Fallback to tab if popup cannot be opened.
     const url = chrome.runtime.getURL("ui/popup/index.html");
+    await chrome.tabs.create({ url });
+  }
+}
+
+async function openPopupWindowOrTab() {
+  const url = chrome.runtime.getURL("ui/popup/index.html");
+  try {
+    await chrome.windows.create({
+      url,
+      type: "popup",
+      width: 560,
+      height: 760,
+    });
+  } catch {
     await chrome.tabs.create({ url });
   }
 }

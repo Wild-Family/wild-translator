@@ -65,6 +65,15 @@ declare namespace chrome {
     function query(queryInfo: Record<string, any>): Promise<any[]>;
   }
 
+  namespace windows {
+    function create(createData: {
+      url: string;
+      type?: "normal" | "popup" | "panel";
+      width?: number;
+      height?: number;
+    }): Promise<any>;
+  }
+
   namespace scripting {
     function executeScript<T>(details: Record<string, any>): Promise<Array<{ result: T }>>;
   }
