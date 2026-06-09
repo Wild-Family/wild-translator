@@ -4,6 +4,11 @@ let lastSelection = "";
 let hideTimer: number | null = null;
 let lastPointer: { x: number; y: number } | null = null;
 
+type SelectionInfo = {
+  text: string;
+  rect: DOMRect | null;
+};
+
 function createButton() {
   if (document.getElementById(BUTTON_ID)) return;
   const btn = document.createElement("button");
@@ -48,7 +53,7 @@ function createButton() {
   btn.addEventListener("click", async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    const text = getSelectionText() || lastSelection;
+    const text = getSelectionInfo(e.target).text || lastSelection;
     if (!text) return;
     lastSelection = text;
     hideButton();
@@ -63,13 +68,33 @@ function createButton() {
   document.body.appendChild(btn);
 }
 
-function getSelectionText() {
+function isEditableSelectionElement(
+  value: Element | null,
+): value is HTMLInputElement | HTMLTextAreaElement {
+  if (!value) return false;
+  return value instanceof HTMLInputElement || value instanceof HTMLTextAreaElement;
+}
+
+function getEditableSelection(el: HTMLInputElement | HTMLTextAreaElement): SelectionInfo {
+  const start = el.selectionStart;
+  const end = el.selectionEnd;
+  if (typeof start !== "number" || typeof end !== "number" || start === end) {
+    return { text: "", rect: null };
+  }
+
+  return {
+    text: el.value.slice(Math.min(start, end), Math.max(start, end)).trim(),
+    rect: el.getBoundingClientRect(),
+  };
+}
+
+function getWindowSelectionText() {
   const sel = window.getSelection?.();
   const text = sel?.toString?.() ?? "";
   return text.trim();
 }
 
-function getSelectionRect(): DOMRect | null {
+function getWindowSelectionRect(): DOMRect | null {
   const sel = window.getSelection?.();
   if (!sel || sel.rangeCount === 0) return null;
   const range = sel.getRangeAt(0);
@@ -78,6 +103,26 @@ function getSelectionRect(): DOMRect | null {
   const rect = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect();
   if (!rect || (!rect.width && !rect.height)) return null;
   return rect;
+}
+
+function getSelectionInfo(target?: EventTarget | null): SelectionInfo {
+  const targetElement = target instanceof Element ? target : null;
+  const activeElement = document.activeElement;
+  const editable = isEditableSelectionElement(targetElement)
+    ? targetElement
+    : isEditableSelectionElement(activeElement)
+      ? activeElement
+      : null;
+
+  if (editable) {
+    const editableSelection = getEditableSelection(editable);
+    if (editableSelection.text) return editableSelection;
+  }
+
+  return {
+    text: getWindowSelectionText(),
+    rect: getWindowSelectionRect(),
+  };
 }
 
 function positionButton(rect: DOMRect) {
@@ -109,20 +154,20 @@ function hideButton() {
 function scheduleHide() {
   if (hideTimer) window.clearTimeout(hideTimer);
   hideTimer = window.setTimeout(() => {
-    const text = getSelectionText();
+    const { text } = getSelectionInfo();
     if (!text) hideButton();
   }, 120);
 }
 
-function handleSelection() {
-  const text = getSelectionText();
-  if (!text || text === lastSelection) {
+function handleSelection(target?: EventTarget | null) {
+  const { text, rect } = getSelectionInfo(target);
+  if (!text) {
+    lastSelection = "";
     scheduleHide();
     return;
   }
 
   lastSelection = text;
-  const rect = getSelectionRect();
   if (!rect) {
     scheduleHide();
     return;
@@ -131,26 +176,27 @@ function handleSelection() {
   showButton(rect);
 }
 
-function onSelectionChange() {
+function onSelectionChange(target?: EventTarget | null) {
   // debounce micro-bursts
   scheduleHide();
-  window.requestAnimationFrame(handleSelection);
+  window.requestAnimationFrame(() => handleSelection(target));
 }
 
 function setup() {
   createButton();
   document.addEventListener("mouseup", (e) => {
     lastPointer = { x: e.clientX, y: e.clientY };
-    onSelectionChange();
+    onSelectionChange(e.target);
   });
-  document.addEventListener("selectionchange", onSelectionChange);
-  document.addEventListener("keyup", onSelectionChange);
+  document.addEventListener("selectionchange", () => onSelectionChange());
+  document.addEventListener("select", (e) => onSelectionChange(e.target), true);
+  document.addEventListener("keyup", (e) => onSelectionChange(e.target));
   document.addEventListener("scroll", () => hideButton(), true);
   document.addEventListener("click", (e) => {
     const target = e.target as HTMLElement | null;
     if (!target) return;
     if (target.id === BUTTON_ID) return;
-    if (!getSelectionText()) hideButton();
+    if (!getSelectionInfo(target).text) hideButton();
   });
 }
 
