@@ -83,7 +83,7 @@ test("packaged layout matches manifest and static HTML references", async () => 
   assert.match(popupHtml, /id="popup-run"/);
   assert.match(popupHtml, /id="popup-output"/);
   assert.match(popupHtml, /width:\s*520px;/);
-  assert.match(popupHtml, /height:\s*720px;/);
+  assert.match(popupHtml, /height:\s*600px;/);
 
   const optionsHtml = await readFile(
     path.join(distDir, "ui/options/index.html"),
