@@ -60,6 +60,7 @@ async function openaiGenerate({
   apiUrl,
   inputText,
   template,
+  signal,
 }: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
   const url = apiUrl
@@ -71,6 +72,7 @@ async function openaiGenerate({
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
+    signal,
     body: JSON.stringify({
       model: model ?? "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
@@ -91,6 +93,7 @@ async function* openaiGenerateStream({
   apiUrl,
   inputText,
   template,
+  signal,
 }: GenerateParams): AsyncGenerator<string> {
   const prompt = buildPrompt(template, inputText);
   const url = apiUrl
@@ -102,6 +105,7 @@ async function* openaiGenerateStream({
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
+    signal,
     body: JSON.stringify({
       model: model ?? "gpt-4o-mini",
       stream: true,
@@ -126,6 +130,7 @@ async function geminiGenerate({
   apiUrl,
   inputText,
   template,
+  signal,
 }: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
   const m = model ?? "gemini-1.5-flash";
@@ -137,6 +142,7 @@ async function geminiGenerate({
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal,
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
     }),
@@ -157,6 +163,7 @@ async function* geminiGenerateStream({
   apiUrl,
   inputText,
   template,
+  signal,
 }: GenerateParams): AsyncGenerator<string> {
   const prompt = buildPrompt(template, inputText);
   const m = model ?? "gemini-1.5-flash";
@@ -169,6 +176,7 @@ async function* geminiGenerateStream({
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal,
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
     }),
@@ -192,6 +200,7 @@ async function claudeGenerate({
   apiUrl,
   inputText,
   template,
+  signal,
 }: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
   const url = apiUrl
@@ -204,6 +213,7 @@ async function claudeGenerate({
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
     },
+    signal,
     body: JSON.stringify({
       model: model ?? "claude-3-5-sonnet-20241022",
       max_tokens: 1024,
@@ -223,6 +233,7 @@ async function* claudeGenerateStream({
   apiUrl,
   inputText,
   template,
+  signal,
 }: GenerateParams): AsyncGenerator<string> {
   const prompt = buildPrompt(template, inputText);
   const url = apiUrl
@@ -236,6 +247,7 @@ async function* claudeGenerateStream({
       "anthropic-version": "2023-06-01",
       Accept: "text/event-stream",
     },
+    signal,
     body: JSON.stringify({
       model: model ?? "claude-3-5-sonnet-20241022",
       max_tokens: 1024,
@@ -272,30 +284,30 @@ async function* readSseJson(
   const decoder = new TextDecoder();
   let buf = "";
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-
+  try {
     while (true) {
-      const idx = buf.indexOf("\n\n");
-      if (idx === -1) break;
-      const chunk = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
 
-      const lines = chunk.split("\n");
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data:")) continue;
-        const dataStr = trimmed.slice(5).trim();
-        if (!dataStr) continue;
-        if (dataStr === "[DONE]") {
-          yield "[DONE]";
-          return;
-        }
-        yield JSON.parse(dataStr);
+      while (true) {
+        const next = takeSseChunk(buf);
+        if (!next) break;
+        buf = next.rest;
+        const parsed = parseSseJsonChunk(next.chunk);
+        if (typeof parsed === "undefined") continue;
+        yield parsed;
+        if (parsed === "[DONE]") return;
       }
     }
+
+    buf += decoder.decode();
+    const parsed = parseSseJsonChunk(buf);
+    if (typeof parsed !== "undefined") {
+      yield parsed;
+    }
+  } finally {
+    reader.releaseLock();
   }
 }
 
@@ -308,26 +320,92 @@ async function* readSseEvents(
   const decoder = new TextDecoder();
   let buf = "";
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-
+  try {
     while (true) {
-      const idx = buf.indexOf("\n\n");
-      if (idx === -1) break;
-      const chunk = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
 
-      let event: string | undefined;
-      const dataLines: string[] = [];
-      for (const line of chunk.split("\n")) {
-        if (line.startsWith("event:")) event = line.slice(6).trim();
-        if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+      while (true) {
+        const next = takeSseChunk(buf);
+        if (!next) break;
+        buf = next.rest;
+        const event = parseSseEventChunk(next.chunk);
+        if (event) yield event;
       }
-      const dataStr = dataLines.join("\n").trim();
-      const data = dataStr ? JSON.parse(dataStr) : undefined;
-      yield { event, data };
+    }
+
+    buf += decoder.decode();
+    const event = parseSseEventChunk(buf);
+    if (event) {
+      yield event;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function takeSseChunk(
+  buf: string,
+): { chunk: string; rest: string } | null {
+  const separator = findSseSeparator(buf);
+  if (!separator) return null;
+  return {
+    chunk: buf.slice(0, separator.index),
+    rest: buf.slice(separator.index + separator.length),
+  };
+}
+
+function parseSseJsonChunk(chunk: string): any | "[DONE]" | undefined {
+  const dataStr = getSseDataString(chunk);
+  if (!dataStr) return undefined;
+  if (dataStr === "[DONE]") return "[DONE]";
+  return JSON.parse(dataStr);
+}
+
+function parseSseEventChunk(chunk: string): SseEvent | null {
+  const lines = chunk.trimEnd().split(/\r?\n/u);
+  let event: string | undefined;
+  const dataLines: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith("event:")) {
+      event = readSseFieldValue(line, "event:");
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(readSseFieldValue(line, "data:"));
     }
   }
+
+  if (!event && !dataLines.length) return null;
+
+  const dataStr = dataLines.join("\n").trim();
+  return {
+    event,
+    data: dataStr ? JSON.parse(dataStr) : undefined,
+  };
+}
+
+function getSseDataString(chunk: string): string | undefined {
+  const dataLines = chunk
+    .trimEnd()
+    .split(/\r?\n/u)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => readSseFieldValue(line, "data:"));
+  const dataStr = dataLines.join("\n").trim();
+  return dataStr || undefined;
+}
+
+function readSseFieldValue(line: string, field: "data:" | "event:"): string {
+  const value = line.slice(field.length);
+  return value.startsWith(" ") ? value.slice(1) : value;
+}
+
+function findSseSeparator(buf: string): { index: number; length: number } | null {
+  const lf = buf.indexOf("\n\n");
+  const crlf = buf.indexOf("\r\n\r\n");
+  if (lf === -1 && crlf === -1) return null;
+  if (lf === -1) return { index: crlf, length: 4 };
+  if (crlf === -1) return { index: lf, length: 2 };
+  return crlf < lf ? { index: crlf, length: 4 } : { index: lf, length: 2 };
 }

@@ -107,16 +107,38 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
     })();
     return true;
   }
+
 });
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.sender?.id !== chrome.runtime.id) return;
   if (port.name !== "wild:generate") return;
+  let disconnected = false;
+  let activeAbortController: AbortController | null = null;
+  const postPortMessage = (message: any) => {
+    if (disconnected) return false;
+    try {
+      port.postMessage(message);
+      return true;
+    } catch {
+      disconnected = true;
+      return false;
+    }
+  };
+
+  port.onDisconnect.addListener(() => {
+    disconnected = true;
+    activeAbortController?.abort();
+  });
 
   port.onMessage.addListener((msg: any) => {
     if (msg?.type !== "GENERATE_STREAM") return;
 
     (async () => {
+      const abortController = new AbortController();
+      activeAbortController?.abort();
+      activeAbortController = abortController;
+
       try {
         const { inputText, promptId } = msg as {
           type: "GENERATE_STREAM";
@@ -138,14 +160,18 @@ chrome.runtime.onConnect.addListener((port) => {
         });
         const cached = await cacheGet(cacheKey);
         if (cached) {
-          port.postMessage({ type: "STREAM_START" });
-          if (cached.text)
-            port.postMessage({ type: "STREAM_DELTA", delta: cached.text });
-          port.postMessage({ type: "STREAM_END" });
+          if (!postPortMessage({ type: "STREAM_START" })) return;
+          if (
+            cached.text &&
+            !postPortMessage({ type: "STREAM_DELTA", delta: cached.text })
+          ) {
+            return;
+          }
+          postPortMessage({ type: "STREAM_END" });
           return;
         }
 
-        port.postMessage({ type: "STREAM_START" });
+        if (!postPortMessage({ type: "STREAM_START" })) return;
         let acc = "";
         for await (const delta of generateStream({
           provider,
@@ -154,17 +180,31 @@ chrome.runtime.onConnect.addListener((port) => {
           apiUrl: prompt.apiUrl,
           inputText,
           template: prompt.template,
+          signal: abortController.signal,
         })) {
-          acc += String(delta ?? "");
-          port.postMessage({ type: "STREAM_DELTA", delta });
+          if (abortController.signal.aborted) return;
+          const textDelta = String(delta ?? "");
+          acc += textDelta;
+          if (
+            textDelta &&
+            !postPortMessage({ type: "STREAM_DELTA", delta: textDelta })
+          ) {
+            return;
+          }
         }
+        if (abortController.signal.aborted) return;
         await cacheSet(cacheKey, acc);
-        port.postMessage({ type: "STREAM_END" });
+        postPortMessage({ type: "STREAM_END" });
       } catch (e: any) {
-        port.postMessage({
+        if (abortController.signal.aborted) return;
+        postPortMessage({
           type: "STREAM_ERROR",
           error: e?.message ?? String(e),
         });
+      } finally {
+        if (activeAbortController === abortController) {
+          activeAbortController = null;
+        }
       }
     })();
   });
