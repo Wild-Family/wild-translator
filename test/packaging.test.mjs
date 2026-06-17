@@ -103,3 +103,13 @@ test("packaged layout matches manifest and static HTML references", async () => 
   assert.match(optionsHtml, /id="prompt-template"/);
   assert.match(optionsHtml, /id="theme-button"/);
 });
+
+test("manifest content script is emitted as a classic script", async () => {
+  const contentScript = await readFile(
+    path.join(distDir, "extension/src/content.js"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(contentScript, /^\s*import\s/m);
+  assert.doesNotMatch(contentScript, /^\s*export\s/m);
+});
