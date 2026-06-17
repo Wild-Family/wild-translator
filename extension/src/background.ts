@@ -14,6 +14,7 @@ type GetSelectionMessage = {
 type OpenUiWithTextMessage = {
   type: "OPEN_UI_WITH_TEXT";
   text: string;
+  fallbackToTab?: boolean;
 };
 
 type GenerateResponse =
@@ -27,6 +28,7 @@ type CacheEntry = {
 
 const CACHE_KEY = "wildCache";
 const CACHE_MAX = 50;
+let pendingDraftText: string | undefined;
 
 chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return;
@@ -95,11 +97,22 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === "CONSUME_PENDING_DRAFT") {
+    const text = pendingDraftText;
+    pendingDraftText = undefined;
+    sendResponse({
+      ok: true,
+      hasDraft: typeof text === "string",
+      text,
+    });
+    return;
+  }
+
   if (msg.type === "OPEN_UI_WITH_TEXT") {
     (async () => {
       try {
-        const { text } = msg as OpenUiWithTextMessage;
-        await openUiWithText(text ?? "");
+        const { text, fallbackToTab } = msg as OpenUiWithTextMessage;
+        await openUiWithText(text ?? "", { fallbackToTab: fallbackToTab === true });
         sendResponse({ ok: true });
       } catch (e: any) {
         sendResponse({ ok: false, error: e?.message ?? String(e) });
@@ -228,20 +241,28 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (command !== "open_ui") return;
   const text = await getSelectionTextFromActiveTab();
   await setDraftText(text ?? "");
-  await openPopupOrTab();
+  await openPopupOrTab({ fallbackToTab: true });
 });
 
-async function openUiWithText(text: string) {
-  await setDraftText(text ?? "");
-  await openPopupOrTab();
+async function openUiWithText(
+  text: string,
+  options: { fallbackToTab: boolean } = { fallbackToTab: true },
+) {
+  const draftText = text ?? "";
+  pendingDraftText = draftText;
+  await openPopupOrTab(options);
+  void setDraftText(draftText);
 }
 
-async function openPopupOrTab() {
+async function openPopupOrTab(options: { fallbackToTab: boolean }) {
   try {
     // Try to open the action popup (works in MV3 with user gesture).
     await chrome.action.openPopup();
   } catch {
-    // Fallback to tab if popup cannot be opened.
+    if (!options.fallbackToTab) {
+      throw new Error("Chrome rejected opening the toolbar popup.");
+    }
+
     const url = chrome.runtime.getURL("ui/popup/index.html");
     await chrome.tabs.create({ url });
   }
