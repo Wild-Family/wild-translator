@@ -14,6 +14,7 @@ type GetSelectionMessage = {
 type OpenUiWithTextMessage = {
   type: "OPEN_UI_WITH_TEXT";
   text: string;
+  fallbackToTab?: boolean;
 };
 
 type GenerateResponse =
@@ -27,6 +28,7 @@ type CacheEntry = {
 
 const CACHE_KEY = "wildCache";
 const CACHE_MAX = 50;
+let pendingDraftText: string | undefined;
 
 chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return;
@@ -95,11 +97,22 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === "CONSUME_PENDING_DRAFT") {
+    const text = pendingDraftText;
+    pendingDraftText = undefined;
+    sendResponse({
+      ok: true,
+      hasDraft: typeof text === "string",
+      text,
+    });
+    return;
+  }
+
   if (msg.type === "OPEN_UI_WITH_TEXT") {
     (async () => {
       try {
-        const { text } = msg as OpenUiWithTextMessage;
-        await openUiWithText(text ?? "");
+        const { text, fallbackToTab } = msg as OpenUiWithTextMessage;
+        await openUiWithText(text ?? "", { fallbackToTab: fallbackToTab === true });
         sendResponse({ ok: true });
       } catch (e: any) {
         sendResponse({ ok: false, error: e?.message ?? String(e) });
@@ -107,16 +120,38 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
     })();
     return true;
   }
+
 });
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.sender?.id !== chrome.runtime.id) return;
   if (port.name !== "wild:generate") return;
+  let disconnected = false;
+  let activeAbortController: AbortController | null = null;
+  const postPortMessage = (message: any) => {
+    if (disconnected) return false;
+    try {
+      port.postMessage(message);
+      return true;
+    } catch {
+      disconnected = true;
+      return false;
+    }
+  };
+
+  port.onDisconnect.addListener(() => {
+    disconnected = true;
+    activeAbortController?.abort();
+  });
 
   port.onMessage.addListener((msg: any) => {
     if (msg?.type !== "GENERATE_STREAM") return;
 
     (async () => {
+      const abortController = new AbortController();
+      activeAbortController?.abort();
+      activeAbortController = abortController;
+
       try {
         const { inputText, promptId } = msg as {
           type: "GENERATE_STREAM";
@@ -138,14 +173,18 @@ chrome.runtime.onConnect.addListener((port) => {
         });
         const cached = await cacheGet(cacheKey);
         if (cached) {
-          port.postMessage({ type: "STREAM_START" });
-          if (cached.text)
-            port.postMessage({ type: "STREAM_DELTA", delta: cached.text });
-          port.postMessage({ type: "STREAM_END" });
+          if (!postPortMessage({ type: "STREAM_START" })) return;
+          if (
+            cached.text &&
+            !postPortMessage({ type: "STREAM_DELTA", delta: cached.text })
+          ) {
+            return;
+          }
+          postPortMessage({ type: "STREAM_END" });
           return;
         }
 
-        port.postMessage({ type: "STREAM_START" });
+        if (!postPortMessage({ type: "STREAM_START" })) return;
         let acc = "";
         for await (const delta of generateStream({
           provider,
@@ -154,17 +193,31 @@ chrome.runtime.onConnect.addListener((port) => {
           apiUrl: prompt.apiUrl,
           inputText,
           template: prompt.template,
+          signal: abortController.signal,
         })) {
-          acc += String(delta ?? "");
-          port.postMessage({ type: "STREAM_DELTA", delta });
+          if (abortController.signal.aborted) return;
+          const textDelta = String(delta ?? "");
+          acc += textDelta;
+          if (
+            textDelta &&
+            !postPortMessage({ type: "STREAM_DELTA", delta: textDelta })
+          ) {
+            return;
+          }
         }
+        if (abortController.signal.aborted) return;
         await cacheSet(cacheKey, acc);
-        port.postMessage({ type: "STREAM_END" });
+        postPortMessage({ type: "STREAM_END" });
       } catch (e: any) {
-        port.postMessage({
+        if (abortController.signal.aborted) return;
+        postPortMessage({
           type: "STREAM_ERROR",
           error: e?.message ?? String(e),
         });
+      } finally {
+        if (activeAbortController === abortController) {
+          activeAbortController = null;
+        }
       }
     })();
   });
@@ -188,20 +241,28 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (command !== "open_ui") return;
   const text = await getSelectionTextFromActiveTab();
   await setDraftText(text ?? "");
-  await openPopupOrTab();
+  await openPopupOrTab({ fallbackToTab: true });
 });
 
-async function openUiWithText(text: string) {
-  await setDraftText(text ?? "");
-  await openPopupOrTab();
+async function openUiWithText(
+  text: string,
+  options: { fallbackToTab: boolean } = { fallbackToTab: true },
+) {
+  const draftText = text ?? "";
+  pendingDraftText = draftText;
+  await openPopupOrTab(options);
+  void setDraftText(draftText);
 }
 
-async function openPopupOrTab() {
+async function openPopupOrTab(options: { fallbackToTab: boolean }) {
   try {
     // Try to open the action popup (works in MV3 with user gesture).
     await chrome.action.openPopup();
   } catch {
-    // Fallback to tab if popup cannot be opened.
+    if (!options.fallbackToTab) {
+      throw new Error("Chrome rejected opening the toolbar popup.");
+    }
+
     const url = chrome.runtime.getURL("ui/popup/index.html");
     await chrome.tabs.create({ url });
   }

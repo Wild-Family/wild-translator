@@ -22,6 +22,7 @@ export type GenerateParams = {
   apiUrl?: string;
   inputText: string;
   template: string;
+  signal?: AbortSignal;
 };
 
 export type GenerateResult = {

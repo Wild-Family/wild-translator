@@ -43,6 +43,15 @@ let saveTimer: number | null = null;
 let runSeq = 0;
 let themeTouched = false;
 let theme: "light" | "dark" = "light";
+let runShortcutModifierDown = false;
+let lastShortcutRunAt = 0;
+let streamQueue = "";
+let streamTimer: number | null = null;
+let streamFlushResolvers: Array<() => void> = [];
+let outputAutoScroll = true;
+
+const STREAM_CHUNK_SIZE = 3;
+const STREAM_CHUNK_DELAY_MS = 24;
 
 type ActiveRun = {
   token: number;
@@ -55,6 +64,14 @@ let activeRun: ActiveRun | null = null;
 function setError(message: string | null): void {
   errorBanner.textContent = message ?? "";
   errorBanner.hidden = !message;
+}
+
+function formatError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/Extension context invalidated/i.test(message)) {
+    return "Extension context was reloaded. Close and reopen this popup.";
+  }
+  return message;
 }
 
 function resolvePromptId(candidate: string | undefined): string | undefined {
@@ -82,29 +99,106 @@ function renderPromptOptions(): void {
   promptSelect.disabled = prompts.length === 0;
 }
 
+function getDraftSnapshot() {
+  return {
+    popupDraft: {
+      input: inputText,
+      output: outputText,
+      promptId: resolvePromptId(defaultPromptId),
+    },
+  };
+}
+
+async function saveDraftNow(): Promise<void> {
+  if (saveTimer !== null) {
+    window.clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+
+  try {
+    await chrome.storage?.local?.set(getDraftSnapshot());
+  } catch {
+    // The popup may be closing or the extension context may have reloaded.
+  }
+}
+
 function scheduleDraftSave(): void {
   if (saveTimer !== null) {
     window.clearTimeout(saveTimer);
   }
+
   saveTimer = window.setTimeout(() => {
-    void chrome.storage?.local?.set({
-      popupDraft: {
-        input: inputText,
-        output: outputText,
-        promptId: resolvePromptId(defaultPromptId),
-      },
-    });
+    saveTimer = null;
+    void saveDraftNow();
   }, 250);
 }
 
 function updateOutput(): void {
   output.textContent = stripMarkdown(outputText) || "Output";
+  if (outputAutoScroll) {
+    output.scrollTop = output.scrollHeight;
+  }
+}
+
+function isOutputAtBottom(): boolean {
+  const distance = output.scrollHeight - output.scrollTop - output.clientHeight;
+  return distance < 24;
+}
+
+function disableOutputAutoScroll(): void {
+  outputAutoScroll = false;
+}
+
+function resolveStreamFlush(): void {
+  const resolvers = streamFlushResolvers;
+  streamFlushResolvers = [];
+  for (const resolve of resolvers) resolve();
+}
+
+function clearStreamQueue(): void {
+  streamQueue = "";
+  if (streamTimer !== null) {
+    window.clearTimeout(streamTimer);
+    streamTimer = null;
+  }
+  resolveStreamFlush();
+}
+
+function flushStreamQueue(): void {
+  if (!streamQueue) {
+    streamTimer = null;
+    resolveStreamFlush();
+    return;
+  }
+
+  const next = streamQueue.slice(0, STREAM_CHUNK_SIZE);
+  streamQueue = streamQueue.slice(STREAM_CHUNK_SIZE);
+  outputText += next;
+  updateOutput();
+  scheduleDraftSave();
+  streamTimer = window.setTimeout(flushStreamQueue, STREAM_CHUNK_DELAY_MS);
+}
+
+function enqueueStreamText(text: string): void {
+  if (!text) return;
+  streamQueue += text;
+  if (streamTimer === null) {
+    flushStreamQueue();
+  }
+}
+
+function waitForStreamFlush(): Promise<void> {
+  if (!streamQueue && streamTimer === null) return Promise.resolve();
+  return new Promise((resolve) => {
+    streamFlushResolvers.push(resolve);
+  });
 }
 
 function updateBusy(nextBusy: boolean): void {
   busy = nextBusy;
   runButton.textContent = nextBusy ? "Stop" : "Run";
   runButton.classList.toggle("btn-danger", nextBusy);
+  output.setAttribute("aria-busy", String(nextBusy));
 }
 
 function applyTheme(nextTheme: "light" | "dark"): void {
@@ -139,6 +233,45 @@ function openSettingsPage(): void {
   }
 }
 
+async function readDraftText(
+  store: chrome.storage.StorageArea | undefined,
+): Promise<{ hasDraft: boolean; text: string | undefined }> {
+  try {
+    const pending = await chrome.runtime?.sendMessage({
+      type: "CONSUME_PENDING_DRAFT",
+    });
+    if (pending?.ok && pending.hasDraft) {
+      return {
+        hasDraft: true,
+        text: typeof pending.text === "string" ? pending.text : undefined,
+      };
+    }
+  } catch {
+    // Fall back to storage when the background context was reloaded.
+  }
+
+  if (!store) return { hasDraft: false, text: undefined };
+
+  for (const delayMs of [0, 25, 75, 150]) {
+    if (delayMs) {
+      await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+    }
+    const draft = await store.get(["draftText"]);
+    if (Object.prototype.hasOwnProperty.call(draft, "draftText")) {
+      return {
+        hasDraft: true,
+        text: typeof draft.draftText === "string" ? draft.draftText : undefined,
+      };
+    }
+  }
+
+  return { hasDraft: false, text: undefined };
+}
+
+async function clearDraftText(store: chrome.storage.StorageArea | undefined) {
+  await store?.remove(["draftText"]);
+}
+
 async function stop(): Promise<void> {
   const currentRun = activeRun;
   if (!currentRun) {
@@ -152,20 +285,26 @@ async function stop(): Promise<void> {
   } catch {
     // ignore
   }
+  clearStreamQueue();
 
   if (activeRun?.token === currentRun.token) {
     activeRun = null;
   }
   updateBusy(false);
+  await saveDraftNow();
 }
 
 async function run(): Promise<void> {
+  if (busy || !inputText.trim()) return;
+
   const token = ++runSeq;
   const nextPromptId = resolvePromptId(defaultPromptId);
 
   setError(null);
   updateBusy(true);
   outputText = "";
+  outputAutoScroll = true;
+  clearStreamQueue();
   updateOutput();
   scheduleDraftSave();
 
@@ -202,12 +341,12 @@ async function run(): Promise<void> {
         if (settled) return;
         if (message?.type === "STREAM_DELTA") {
           if (activeRun?.token !== token) return;
-          outputText += String(message.delta ?? "");
-          updateOutput();
-          scheduleDraftSave();
+          enqueueStreamText(String(message.delta ?? ""));
         }
         if (message?.type === "STREAM_ERROR") {
           runState.disconnectExpected = true;
+          clearStreamQueue();
+          void saveDraftNow();
           try {
             nextPort.disconnect();
           } catch {
@@ -218,13 +357,16 @@ async function run(): Promise<void> {
           });
         }
         if (message?.type === "STREAM_END") {
-          runState.disconnectExpected = true;
-          try {
-            nextPort.disconnect();
-          } catch {
-            // ignore
-          }
-          settle(resolve);
+          void waitForStreamFlush().then(async () => {
+            await saveDraftNow();
+            runState.disconnectExpected = true;
+            try {
+              nextPort.disconnect();
+            } catch {
+              // ignore
+            }
+            settle(resolve);
+          });
         }
       });
 
@@ -236,13 +378,60 @@ async function run(): Promise<void> {
     });
   } catch (error) {
     if (activeRun?.token === token) {
-      setError(error instanceof Error ? error.message : String(error));
+      setError(formatError(error));
     }
   } finally {
     if (activeRun?.token === token) {
       activeRun = null;
+      updateOutput();
       updateBusy(false);
+      void saveDraftNow();
     }
+  }
+}
+
+function isRunShortcut(event: KeyboardEvent): boolean {
+  const isEnter =
+    event.key === "Enter" ||
+    event.code === "Enter" ||
+    event.code === "NumpadEnter" ||
+    event.keyCode === 13;
+  return (
+    isEnter &&
+    (event.metaKey ||
+      event.ctrlKey ||
+      event.getModifierState?.("Meta") ||
+      event.getModifierState?.("Control") ||
+      runShortcutModifierDown)
+  );
+}
+
+function handleRunShortcut(event: KeyboardEvent): void {
+  if (event.metaKey || event.ctrlKey) {
+    runShortcutModifierDown = true;
+  }
+  if (event.key === "Meta" || event.key === "Control") {
+    runShortcutModifierDown = true;
+    return;
+  }
+  if (!isRunShortcut(event)) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  const now = Date.now();
+  if (now - lastShortcutRunAt < 250) return;
+  lastShortcutRunAt = now;
+  if (busy) {
+    void stop();
+    return;
+  }
+  void run();
+}
+
+function handleShortcutKeyup(event: KeyboardEvent): void {
+  handleRunShortcut(event);
+  if (event.key === "Meta" || event.key === "Control") {
+    runShortcutModifierDown = false;
   }
 }
 
@@ -258,17 +447,40 @@ input.addEventListener("input", () => {
   scheduleDraftSave();
 });
 
-input.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-    event.preventDefault();
-    if (!busy && inputText.trim()) {
-      void run();
-    }
-  }
+output.addEventListener("scroll", () => {
+  outputAutoScroll = isOutputAtBottom();
+});
+output.addEventListener("wheel", disableOutputAutoScroll, { passive: true });
+output.addEventListener("pointerdown", disableOutputAutoScroll);
+output.addEventListener("touchstart", disableOutputAutoScroll, {
+  passive: true,
+});
 
+input.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && busy) {
     event.preventDefault();
     void stop();
+  }
+});
+
+window.addEventListener("keydown", handleRunShortcut, true);
+window.addEventListener("keyup", handleShortcutKeyup, true);
+window.addEventListener("keypress", handleRunShortcut, true);
+document.addEventListener("keydown", handleRunShortcut, true);
+document.addEventListener("keyup", handleShortcutKeyup, true);
+document.addEventListener("keypress", handleRunShortcut, true);
+input.addEventListener("keydown", handleRunShortcut, true);
+input.addEventListener("keyup", handleShortcutKeyup, true);
+input.addEventListener("keypress", handleRunShortcut, true);
+window.addEventListener("blur", () => {
+  runShortcutModifierDown = false;
+});
+window.addEventListener("pagehide", () => {
+  void saveDraftNow();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    void saveDraftNow();
   }
 });
 
@@ -307,22 +519,20 @@ async function initialize(): Promise<void> {
     try {
       const store = chrome.storage?.session ?? chrome.storage?.local;
       const prefs = await chrome.storage?.local?.get(["selectionPrefillEnabled"]);
+      const savedDraft = await chrome.storage?.local?.get(["popupDraft"]);
+      const saved = savedDraft?.popupDraft;
       const selectionPrefillEnabled = prefs?.selectionPrefillEnabled !== false;
       let hasSelectionDraft = false;
 
       if (!selectionPrefillEnabled) {
         await store?.remove(["draftText"]);
       } else {
-        const draft = store ? await store.get(["draftText"]) : {};
-        hasSelectionDraft = Object.prototype.hasOwnProperty.call(
-          draft,
-          "draftText",
-        );
-        const text = draft?.draftText;
+        const draft = await readDraftText(store);
+        hasSelectionDraft = draft.hasDraft;
+        const text = draft.text;
         if (typeof text === "string") {
           inputText = text;
           input.value = text;
-          outputText = "";
           if (text.trim()) {
             window.requestAnimationFrame(() => {
               const end = input.value.length;
@@ -331,21 +541,19 @@ async function initialize(): Promise<void> {
             });
           }
         }
-        await store?.remove(["draftText"]);
+        await clearDraftText(store);
       }
 
+      if (saved?.output) {
+        outputText = saved.output;
+      }
+      if (saved?.promptId) {
+        defaultPromptId = resolvePromptId(saved.promptId);
+      }
       if (!hasSelectionDraft && !inputText.trim()) {
-        const savedDraft = await chrome.storage?.local?.get(["popupDraft"]);
-        const saved = savedDraft?.popupDraft;
         if (saved?.input) {
           inputText = saved.input;
           input.value = saved.input;
-        }
-        if (saved?.output) {
-          outputText = saved.output;
-        }
-        if (saved?.promptId) {
-          defaultPromptId = resolvePromptId(saved.promptId);
         }
       }
     } catch {
@@ -369,7 +577,7 @@ async function initialize(): Promise<void> {
     });
   } catch (error) {
     loading.hidden = true;
-    setError(error instanceof Error ? error.message : String(error));
+    setError(formatError(error));
   }
 }
 
