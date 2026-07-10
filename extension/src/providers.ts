@@ -5,6 +5,34 @@ import type {
 } from "../../shared/src/types.js";
 import { renderPromptTemplate } from "../../shared/src/prompt.js";
 
+export type SpeechFormat = "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm";
+
+export type OpenAiSpeechParams = {
+  apiKey: string;
+  inputText: string;
+  model?: string;
+  voice?: string;
+  responseFormat?: SpeechFormat;
+  instructions?: string;
+  apiUrl?: string;
+  signal?: AbortSignal;
+};
+
+export type OpenAiSpeechResult = {
+  audioBase64: string;
+  mediaType: string;
+  byteLength: number;
+};
+
+const SPEECH_MEDIA_TYPES: Record<SpeechFormat, string> = {
+  mp3: "audio/mpeg",
+  opus: "audio/ogg",
+  aac: "audio/aac",
+  flac: "audio/flac",
+  wav: "audio/wav",
+  pcm: "audio/pcm",
+};
+
 export async function generate(
   params: GenerateParams,
 ): Promise<GenerateResult> {
@@ -40,6 +68,46 @@ export async function* generateStream(
       throw new Error(`Unsupported provider: ${_exhaustive}`);
     }
   }
+}
+
+export async function generateOpenAiSpeech({
+  apiKey,
+  inputText,
+  model,
+  voice,
+  responseFormat = "mp3",
+  instructions,
+  apiUrl,
+  signal,
+}: OpenAiSpeechParams): Promise<OpenAiSpeechResult> {
+  const url = apiUrl
+    ? `${validateApiUrl(apiUrl)}/v1/audio/speech`
+    : "https://api.openai.com/v1/audio/speech";
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    signal,
+    body: JSON.stringify({
+      model: model ?? "gpt-4o-mini-tts",
+      voice: voice ?? "marin",
+      input: inputText,
+      response_format: responseFormat,
+      ...(instructions ? { instructions } : {}),
+    }),
+  });
+
+  if (!res.ok)
+    throw new Error(`OpenAI speech error: ${res.status} ${await res.text()}`);
+
+  const audio = await res.arrayBuffer();
+  return {
+    audioBase64: arrayBufferToBase64(audio),
+    mediaType: SPEECH_MEDIA_TYPES[responseFormat],
+    byteLength: audio.byteLength,
+  };
 }
 
 function buildPrompt(template: string, inputText: string) {
@@ -408,4 +476,17 @@ function findSseSeparator(buf: string): { index: number; length: number } | null
   if (lf === -1) return { index: crlf, length: 4 };
   if (crlf === -1) return { index: lf, length: 2 };
   return crlf < lf ? { index: crlf, length: 4 } : { index: lf, length: 2 };
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
 }

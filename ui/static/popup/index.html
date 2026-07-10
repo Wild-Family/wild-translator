@@ -118,10 +118,16 @@
         resize: none;
       }
 
-      #popup-run {
-        display: block;
-        width: 100%;
+      .popup-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
         margin-block: 0.5rem;
+      }
+
+      #popup-run,
+      #popup-speech {
+        width: 100%;
         padding: 8px 16px;
       }
 
@@ -193,7 +199,17 @@
               rows="7"
             ></textarea>
 
-            <button id="popup-run" type="button">Run</button>
+            <div class="popup-actions">
+              <button
+                id="popup-speech"
+                type="button"
+                class="btn-secondary"
+                aria-label="Play English with AI-generated voice"
+              >
+                Play English (AI)
+              </button>
+              <button id="popup-run" type="button">Run</button>
+            </div>
 
             <div id="popup-output" class="popup-output">Output</div>
           </div>

@@ -41,6 +41,7 @@ Examples:
 - Commit messages follow Conventional Commits (e.g., `feat: ...`, `ci: ...`).
 - PRs should include a clear description, reproduction steps, and screenshots for UI changes.
 - Link any relevant issues and call out config changes (e.g., API key handling, new permissions).
+- After completing implementation work, create a PR for the completed changes. If the user explicitly asks to merge it, merge the PR after validation passes.
 
 ## Security & Configuration Tips
 

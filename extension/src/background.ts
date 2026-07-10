@@ -1,4 +1,11 @@
-import { generate, generateStream, requireApiKey } from "./providers.js";
+import {
+  generate,
+  generateOpenAiSpeech,
+  generateStream,
+  requireApiKey,
+  type OpenAiSpeechResult,
+  type SpeechFormat,
+} from "./providers.js";
 import { storage } from "./storage.js";
 
 type GenerateMessage = {
@@ -17,8 +24,17 @@ type OpenUiWithTextMessage = {
   fallbackToTab?: boolean;
 };
 
+type GenerateSpeechMessage = {
+  type: "GENERATE_SPEECH";
+  text: string;
+};
+
 type GenerateResponse =
   | { ok: true; text: string }
+  | { ok: false; error: string };
+
+type GenerateSpeechResponse =
+  | { ok: true; audioDataUrl: string; cached: boolean }
   | { ok: false; error: string };
 
 type CacheEntry = {
@@ -26,9 +42,22 @@ type CacheEntry = {
   ts: number;
 };
 
+type SpeechCacheEntry = OpenAiSpeechResult & {
+  ts: number;
+};
+
 const CACHE_KEY = "wildCache";
 const CACHE_MAX = 50;
+const SPEECH_CACHE_KEY = "wildSpeechCache";
+const SPEECH_CACHE_MAX = 12;
+const SPEECH_CACHE_MAX_BYTES = 8 * 1024 * 1024;
+const SPEECH_MODEL = "gpt-4o-mini-tts";
+const SPEECH_VOICE = "marin";
+const SPEECH_RESPONSE_FORMAT: SpeechFormat = "mp3";
+const SPEECH_INSTRUCTIONS =
+  "Read the text clearly in natural English with neutral pacing.";
 let pendingDraftText: string | undefined;
+const pendingSpeechRequests = new Map<string, Promise<SpeechCacheEntry>>();
 
 chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return;
@@ -83,6 +112,63 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
     })();
 
     return true; // async
+  }
+
+  if (msg.type === "GENERATE_SPEECH") {
+    (async () => {
+      try {
+        const inputText = normalizeSpeechInput(
+          (msg as GenerateSpeechMessage).text ?? "",
+        );
+        if (!inputText) throw new Error("No English text to read.");
+
+        const cacheKey = await buildCacheKey({
+          feature: "openai-speech",
+          model: SPEECH_MODEL,
+          voice: SPEECH_VOICE,
+          responseFormat: SPEECH_RESPONSE_FORMAT,
+          instructions: SPEECH_INSTRUCTIONS,
+          inputText,
+        });
+        const cached = await speechCacheGet(cacheKey);
+        if (cached) {
+          sendResponse({
+            ok: true,
+            audioDataUrl: speechDataUrl(cached),
+            cached: true,
+          } satisfies GenerateSpeechResponse);
+          return;
+        }
+
+        const s = await storage.getAll();
+        const apiKey = requireApiKey("openai", s.apiKeys);
+        const generated = await createSpeechOnce(cacheKey, async () => {
+          const audio = await generateOpenAiSpeech({
+            apiKey,
+            inputText,
+            model: SPEECH_MODEL,
+            voice: SPEECH_VOICE,
+            responseFormat: SPEECH_RESPONSE_FORMAT,
+            instructions: SPEECH_INSTRUCTIONS,
+          });
+          return { ...audio, ts: Date.now() };
+        });
+
+        await speechCacheSet(cacheKey, generated);
+        sendResponse({
+          ok: true,
+          audioDataUrl: speechDataUrl(generated),
+          cached: false,
+        } satisfies GenerateSpeechResponse);
+      } catch (e: any) {
+        sendResponse({
+          ok: false,
+          error: e?.message ?? String(e),
+        } satisfies GenerateSpeechResponse);
+      }
+    })();
+
+    return true;
   }
 
   if (msg.type === "GET_SELECTION") {
@@ -308,12 +394,7 @@ async function getSelectionTextFromActiveTab(): Promise<string> {
   }
 }
 
-async function buildCacheKey(input: {
-  provider: string;
-  model?: string;
-  template: string;
-  inputText: string;
-}): Promise<string> {
+async function buildCacheKey(input: Record<string, unknown>): Promise<string> {
   const raw = JSON.stringify(input);
   const data = new TextEncoder().encode(raw);
   const hash = await crypto.subtle.digest("SHA-256", data);
@@ -364,4 +445,116 @@ async function cacheEnabled(): Promise<boolean> {
     // ignore
   }
   return true;
+}
+
+function normalizeSpeechInput(text: string): string {
+  return text.trim();
+}
+
+function speechDataUrl(
+  entry: Pick<SpeechCacheEntry, "audioBase64" | "mediaType">,
+): string {
+  return `data:${entry.mediaType};base64,${entry.audioBase64}`;
+}
+
+async function createSpeechOnce(
+  key: string,
+  create: () => Promise<SpeechCacheEntry>,
+): Promise<SpeechCacheEntry> {
+  const pending = pendingSpeechRequests.get(key);
+  if (pending) return pending;
+
+  const next = create().finally(() => {
+    pendingSpeechRequests.delete(key);
+  });
+  pendingSpeechRequests.set(key, next);
+  return next;
+}
+
+async function speechCacheGet(key: string): Promise<SpeechCacheEntry | null> {
+  try {
+    const store = await chrome.storage.local.get([SPEECH_CACHE_KEY]);
+    const cache = (store?.[SPEECH_CACHE_KEY] ?? {}) as Record<
+      string,
+      SpeechCacheEntry
+    >;
+    const hit = cache[key];
+    if (!hit?.audioBase64 || !hit?.mediaType) return null;
+
+    hit.ts = Date.now();
+    void Promise.resolve(
+      chrome.storage.local.set({ [SPEECH_CACHE_KEY]: cache }),
+    ).catch(() => undefined);
+    return hit;
+  } catch {
+    return null;
+  }
+}
+
+async function speechCacheSet(
+  key: string,
+  entry: SpeechCacheEntry,
+): Promise<void> {
+  try {
+    const store = await chrome.storage.local.get([SPEECH_CACHE_KEY]);
+    const cache = (store?.[SPEECH_CACHE_KEY] ?? {}) as Record<
+      string,
+      SpeechCacheEntry
+    >;
+
+    cache[key] = { ...entry, ts: Date.now() };
+    pruneSpeechCache(cache, key);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        await chrome.storage.local.set({ [SPEECH_CACHE_KEY]: cache });
+        return;
+      } catch {
+        if (!removeOldestSpeechEntry(cache, key)) return;
+      }
+    }
+  } catch {
+    // Audio playback should still work even when the local cache cannot persist.
+  }
+}
+
+function pruneSpeechCache(
+  cache: Record<string, SpeechCacheEntry>,
+  protectedKey: string,
+): void {
+  while (Object.keys(cache).length > SPEECH_CACHE_MAX) {
+    if (!removeOldestSpeechEntry(cache, protectedKey)) break;
+  }
+
+  while (
+    speechCacheByteLength(cache) > SPEECH_CACHE_MAX_BYTES &&
+    Object.keys(cache).length > 1
+  ) {
+    if (!removeOldestSpeechEntry(cache, protectedKey)) break;
+  }
+}
+
+function removeOldestSpeechEntry(
+  cache: Record<string, SpeechCacheEntry>,
+  protectedKey: string,
+): boolean {
+  const removable = Object.keys(cache)
+    .filter((key) => key !== protectedKey)
+    .sort((a, b) => (cache[a]?.ts ?? 0) - (cache[b]?.ts ?? 0));
+  const [oldest] = removable;
+  if (!oldest) return false;
+  delete cache[oldest];
+  return true;
+}
+
+function speechCacheByteLength(cache: Record<string, SpeechCacheEntry>): number {
+  return Object.values(cache).reduce(
+    (total, entry) =>
+      total + (entry.byteLength || estimateBase64Bytes(entry.audioBase64)),
+    0,
+  );
+}
+
+function estimateBase64Bytes(value: string): number {
+  return Math.ceil((value.length * 3) / 4);
 }
