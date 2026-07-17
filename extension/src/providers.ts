@@ -5,34 +5,6 @@ import type {
 } from "../../shared/src/types.js";
 import { renderPromptTemplate } from "../../shared/src/prompt.js";
 
-export type SpeechFormat = "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm";
-
-export type OpenAiSpeechParams = {
-  apiKey: string;
-  inputText: string;
-  model?: string;
-  voice?: string;
-  responseFormat?: SpeechFormat;
-  instructions?: string;
-  apiUrl?: string;
-  signal?: AbortSignal;
-};
-
-export type OpenAiSpeechResult = {
-  audioBase64: string;
-  mediaType: string;
-  byteLength: number;
-};
-
-const SPEECH_MEDIA_TYPES: Record<SpeechFormat, string> = {
-  mp3: "audio/mpeg",
-  opus: "audio/ogg",
-  aac: "audio/aac",
-  flac: "audio/flac",
-  wav: "audio/wav",
-  pcm: "audio/pcm",
-};
-
 export async function generate(
   params: GenerateParams,
 ): Promise<GenerateResult> {
@@ -70,70 +42,19 @@ export async function* generateStream(
   }
 }
 
-export async function generateOpenAiSpeech({
-  apiKey,
-  inputText,
-  model,
-  voice,
-  responseFormat = "mp3",
-  instructions,
-  apiUrl,
-  signal,
-}: OpenAiSpeechParams): Promise<OpenAiSpeechResult> {
-  const url = apiUrl
-    ? `${validateApiUrl(apiUrl)}/v1/audio/speech`
-    : "https://api.openai.com/v1/audio/speech";
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    signal,
-    body: JSON.stringify({
-      model: model ?? "gpt-4o-mini-tts",
-      voice: voice ?? "marin",
-      input: inputText,
-      response_format: responseFormat,
-      ...(instructions ? { instructions } : {}),
-    }),
-  });
-
-  if (!res.ok)
-    throw new Error(`OpenAI speech error: ${res.status} ${await res.text()}`);
-
-  const audio = await res.arrayBuffer();
-  return {
-    audioBase64: arrayBufferToBase64(audio),
-    mediaType: SPEECH_MEDIA_TYPES[responseFormat],
-    byteLength: audio.byteLength,
-  };
-}
-
 function buildPrompt(template: string, inputText: string) {
   return renderPromptTemplate(template, { text: inputText });
-}
-
-function validateApiUrl(raw: string): string {
-  const url = raw.replace(/\/+$/, "");
-  if (!/^https?:\/\//i.test(url)) {
-    throw new Error(`Invalid API URL scheme (must be http or https): ${url}`);
-  }
-  return url;
 }
 
 async function openaiGenerate({
   apiKey,
   model,
-  apiUrl,
   inputText,
   template,
   signal,
 }: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
-  const url = apiUrl
-    ? `${validateApiUrl(apiUrl)}/v1/chat/completions`
-    : "https://api.openai.com/v1/chat/completions";
+  const url = "https://api.openai.com/v1/chat/completions";
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -158,15 +79,12 @@ async function openaiGenerate({
 async function* openaiGenerateStream({
   apiKey,
   model,
-  apiUrl,
   inputText,
   template,
   signal,
 }: GenerateParams): AsyncGenerator<string> {
   const prompt = buildPrompt(template, inputText);
-  const url = apiUrl
-    ? `${validateApiUrl(apiUrl)}/v1/chat/completions`
-    : "https://api.openai.com/v1/chat/completions";
+  const url = "https://api.openai.com/v1/chat/completions";
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -195,16 +113,13 @@ async function* openaiGenerateStream({
 async function geminiGenerate({
   apiKey,
   model,
-  apiUrl,
   inputText,
   template,
   signal,
 }: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
   const m = model ?? "gemini-1.5-flash";
-  const base = apiUrl
-    ? validateApiUrl(apiUrl)
-    : "https://generativelanguage.googleapis.com";
+  const base = "https://generativelanguage.googleapis.com";
   const url = `${base}/v1beta/models/${encodeURIComponent(m)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   const res = await fetch(url, {
@@ -228,16 +143,13 @@ async function geminiGenerate({
 async function* geminiGenerateStream({
   apiKey,
   model,
-  apiUrl,
   inputText,
   template,
   signal,
 }: GenerateParams): AsyncGenerator<string> {
   const prompt = buildPrompt(template, inputText);
   const m = model ?? "gemini-1.5-flash";
-  const base = apiUrl
-    ? validateApiUrl(apiUrl)
-    : "https://generativelanguage.googleapis.com";
+  const base = "https://generativelanguage.googleapis.com";
   // SSE streaming
   const url = `${base}/v1beta/models/${encodeURIComponent(m)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
 
@@ -265,15 +177,12 @@ async function* geminiGenerateStream({
 async function claudeGenerate({
   apiKey,
   model,
-  apiUrl,
   inputText,
   template,
   signal,
 }: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
-  const url = apiUrl
-    ? `${validateApiUrl(apiUrl)}/v1/messages`
-    : "https://api.anthropic.com/v1/messages";
+  const url = "https://api.anthropic.com/v1/messages";
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -298,15 +207,12 @@ async function claudeGenerate({
 async function* claudeGenerateStream({
   apiKey,
   model,
-  apiUrl,
   inputText,
   template,
   signal,
 }: GenerateParams): AsyncGenerator<string> {
   const prompt = buildPrompt(template, inputText);
-  const url = apiUrl
-    ? `${validateApiUrl(apiUrl)}/v1/messages`
-    : "https://api.anthropic.com/v1/messages";
+  const url = "https://api.anthropic.com/v1/messages";
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -476,17 +382,4 @@ function findSseSeparator(buf: string): { index: number; length: number } | null
   if (lf === -1) return { index: crlf, length: 4 };
   if (crlf === -1) return { index: lf, length: 2 };
   return crlf < lf ? { index: crlf, length: 4 } : { index: lf, length: 2 };
-}
-
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  let binary = "";
-
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-
-  return btoa(binary);
 }

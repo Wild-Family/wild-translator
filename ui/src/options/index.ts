@@ -49,7 +49,6 @@ const promptEditor = requireElement<HTMLDivElement>("prompt-editor");
 const nameInput = requireElement<HTMLInputElement>("prompt-name");
 const providerSelect = requireElement<HTMLSelectElement>("prompt-provider");
 const modelInput = requireElement<HTMLInputElement>("prompt-model");
-const apiUrlInput = requireElement<HTMLInputElement>("prompt-api-url");
 const templateInput = requireElement<HTMLTextAreaElement>("prompt-template");
 const setDefaultButton = requireElement<HTMLButtonElement>("prompt-set-default");
 const deletePromptButton = requireElement<HTMLButtonElement>("prompt-delete");
@@ -195,7 +194,6 @@ function setPromptEditorDisabled(disabled: boolean): void {
     nameInput,
     providerSelect,
     modelInput,
-    apiUrlInput,
     templateInput,
     setDefaultButton,
     deletePromptButton,
@@ -217,7 +215,6 @@ function renderPromptEditor(): void {
     nameInput.value = "";
     providerSelect.value = "openai";
     modelInput.value = "";
-    apiUrlInput.value = "";
     templateInput.value = "";
     promptFieldSync = false;
     return;
@@ -228,7 +225,6 @@ function renderPromptEditor(): void {
   nameInput.value = prompt.name;
   providerSelect.value = prompt.provider ?? "openai";
   modelInput.value = prompt.model ?? "";
-  apiUrlInput.value = prompt.apiUrl ?? "";
   templateInput.value = prompt.template;
   setDefaultButton.disabled = state.defaultPromptId === prompt.id;
   promptFieldSync = false;
@@ -362,16 +358,6 @@ modelInput.addEventListener("input", () => {
   void savePromptPatch(state.selectedPromptId, (prompt) => ({
     ...prompt,
     model: modelInput.value || undefined,
-  })).catch((error) => {
-    showError(error instanceof Error ? error.message : String(error));
-  });
-});
-
-apiUrlInput.addEventListener("input", () => {
-  if (promptFieldSync || !state.selectedPromptId) return;
-  void savePromptPatch(state.selectedPromptId, (prompt) => ({
-    ...prompt,
-    apiUrl: apiUrlInput.value || undefined,
   })).catch((error) => {
     showError(error instanceof Error ? error.message : String(error));
   });

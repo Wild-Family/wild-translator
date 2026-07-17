@@ -6,7 +6,6 @@ export type PromptTemplate = {
   template: string;
   provider?: ProviderId;
   model?: string;
-  apiUrl?: string;
 };
 
 export type ApiKeys = {

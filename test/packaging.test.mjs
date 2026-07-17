@@ -36,20 +36,24 @@ test("packaged layout matches manifest and static HTML references", async () => 
     "extension-dist/ui/src/popup/index.js",
     "extension-dist/ui/src/options/index.js",
     "extension-dist/extension/src/background.js",
-    "extension-dist/extension/src/content.js",
   ];
 
   for (const relPath of expectedFiles) {
     assert.equal(await exists(relPath), true, `missing ${relPath}`);
   }
 
+  assert.equal(await exists("extension-dist/extension/src/content.js"), false);
   assert.deepEqual(distManifest, manifest);
   assert.equal(manifest.action.default_popup, "ui/popup/index.html");
   assert.equal(manifest.options_page, "ui/options/index.html");
-  assert.equal(manifest.background.service_worker, "extension/src/background.js");
-  assert.deepEqual(manifest.content_scripts?.[0]?.js, [
-    "extension/src/content.js",
+  assert.deepEqual(manifest.permissions, ["storage", "contextMenus"]);
+  assert.deepEqual(manifest.host_permissions, [
+    "https://api.openai.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://api.anthropic.com/*",
   ]);
+  assert.equal(manifest.background.service_worker, "extension/src/background.js");
+  assert.equal("content_scripts" in manifest, false);
 
   const indexHtml = await readFile(
     path.join(distDir, "ui/index.html"),
@@ -81,6 +85,7 @@ test("packaged layout matches manifest and static HTML references", async () => 
   assert.match(popupHtml, /id="popup-prompt-select"/);
   assert.match(popupHtml, /id="popup-input"/);
   assert.match(popupHtml, /id="popup-run"/);
+  assert.doesNotMatch(popupHtml, /popup-speech|Play English/);
   assert.match(popupHtml, /id="popup-output"/);
   assert.match(popupHtml, /width:\s*520px;/);
   assert.match(popupHtml, /height:\s*600px;/);
@@ -102,14 +107,4 @@ test("packaged layout matches manifest and static HTML references", async () => 
   assert.match(optionsHtml, /id="prompt-name"/);
   assert.match(optionsHtml, /id="prompt-template"/);
   assert.match(optionsHtml, /id="theme-button"/);
-});
-
-test("manifest content script is emitted as a classic script", async () => {
-  const contentScript = await readFile(
-    path.join(distDir, "extension/src/content.js"),
-    "utf8",
-  );
-
-  assert.doesNotMatch(contentScript, /^\s*import\s/m);
-  assert.doesNotMatch(contentScript, /^\s*export\s/m);
 });

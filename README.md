@@ -63,4 +63,4 @@ A command is registered (default `Ctrl+Shift+Y` / `Cmd+Shift+Y`) which opens the
 
 ## Notes
 - Streaming is not implemented yet (non-streaming MVP).
-- Selected-text capture via content script is stubbed.
+- Selected text can be sent through the context menu; the extension does not inject an always-on content script.

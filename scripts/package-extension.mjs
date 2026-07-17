@@ -162,7 +162,6 @@ const requiredFiles = [
   "ui/index.html",
   "ui/styles.css",
   "extension/src/background.js",
-  "extension/src/content.js",
 ];
 
 for (const file of requiredFiles) {
