@@ -103,6 +103,8 @@ test("packaged layout matches manifest and static HTML references", async () => 
   assert.match(optionsHtml, /id="content"/);
   assert.match(optionsHtml, /id="error-banner"/);
   assert.match(optionsHtml, /id="saved-banner"/);
+  assert.match(optionsHtml, /Keys are saved automatically/);
+  assert.doesNotMatch(optionsHtml, /id="keys-save"/);
   assert.match(optionsHtml, /id="prompt-select"/);
   assert.match(optionsHtml, /id="prompt-name"/);
   assert.match(optionsHtml, /id="prompt-template"/);
