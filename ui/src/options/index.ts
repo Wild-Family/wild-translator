@@ -36,7 +36,6 @@ const tabPanels = Array.from(
 const openAiInput = requireElement<HTMLInputElement>("openai-api-key");
 const geminiInput = requireElement<HTMLInputElement>("gemini-api-key");
 const claudeInput = requireElement<HTMLInputElement>("claude-api-key");
-const saveKeysButton = requireElement<HTMLButtonElement>("keys-save");
 const cacheCheckbox = requireElement<HTMLInputElement>("cache-enabled");
 const selectionCheckbox = requireElement<HTMLInputElement>(
   "selection-prefill-enabled",
@@ -69,6 +68,9 @@ const state: SettingsState = {
 };
 
 let promptFieldSync = false;
+let apiKeysSaveTimer: number | null = null;
+let apiKeysSaveChain: Promise<void> = Promise.resolve();
+let savedApiKeysJson = JSON.stringify(state.apiKeys);
 let promptSaveChain: Promise<void> = Promise.resolve();
 let themeTouched = false;
 let theme: "light" | "dark" = "light";
@@ -139,6 +141,60 @@ function queuePromptPersist(): Promise<void> {
   );
   promptSaveChain = task;
   return task;
+}
+
+function readApiKeysFromInputs(): ApiKeys {
+  return {
+    openai: openAiInput.value,
+    gemini: geminiInput.value,
+    claude: claudeInput.value,
+  };
+}
+
+function queueApiKeysPersist(): Promise<void> {
+  const snapshot = { ...state.apiKeys };
+  const nextJson = JSON.stringify(snapshot);
+  if (nextJson === savedApiKeysJson) return Promise.resolve();
+
+  const task = apiKeysSaveChain
+    .catch(() => undefined)
+    .then(async () => {
+      await setAll({ apiKeys: snapshot });
+      savedApiKeysJson = nextJson;
+      showSaved("Saved.");
+    });
+  apiKeysSaveChain = task;
+  return task;
+}
+
+function scheduleApiKeysPersist(): void {
+  if (apiKeysSaveTimer !== null) {
+    window.clearTimeout(apiKeysSaveTimer);
+  }
+
+  apiKeysSaveTimer = window.setTimeout(() => {
+    apiKeysSaveTimer = null;
+    void queueApiKeysPersist().catch((error) => {
+      showError(error instanceof Error ? error.message : String(error));
+    });
+  }, 300);
+}
+
+function flushApiKeysPersist(): void {
+  if (apiKeysSaveTimer !== null) {
+    window.clearTimeout(apiKeysSaveTimer);
+    apiKeysSaveTimer = null;
+  }
+
+  void queueApiKeysPersist().catch((error) => {
+    showError(error instanceof Error ? error.message : String(error));
+  });
+}
+
+function handleApiKeysInput(): void {
+  state.apiKeys = readApiKeysFromInputs();
+  showError(null);
+  scheduleApiKeysPersist();
 }
 
 async function savePromptPatch(
@@ -263,28 +319,13 @@ for (const button of tabButtons) {
   });
 }
 
-openAiInput.addEventListener("input", () => {
-  state.apiKeys.openai = openAiInput.value;
-});
+for (const input of [openAiInput, geminiInput, claudeInput]) {
+  input.addEventListener("input", handleApiKeysInput);
+  input.addEventListener("change", flushApiKeysPersist);
+  input.addEventListener("blur", flushApiKeysPersist);
+}
 
-geminiInput.addEventListener("input", () => {
-  state.apiKeys.gemini = geminiInput.value;
-});
-
-claudeInput.addEventListener("input", () => {
-  state.apiKeys.claude = claudeInput.value;
-});
-
-saveKeysButton.addEventListener("click", async () => {
-  showError(null);
-  showSaved(null);
-  try {
-    await setAll({ apiKeys: state.apiKeys });
-    showSaved("Saved.");
-  } catch (error) {
-    showError(error instanceof Error ? error.message : String(error));
-  }
-});
+window.addEventListener("pagehide", flushApiKeysPersist);
 
 cacheCheckbox.addEventListener("change", async () => {
   state.cacheEnabled = cacheCheckbox.checked;
@@ -430,6 +471,7 @@ async function initialize(): Promise<void> {
   try {
     const stored = await getAll();
     state.apiKeys = stored.apiKeys ?? {};
+    savedApiKeysJson = JSON.stringify(state.apiKeys);
     state.prompts = stored.prompts ?? [];
     state.defaultPromptId =
       getPromptById(stored.defaultPromptId)?.id ?? state.prompts[0]?.id;
