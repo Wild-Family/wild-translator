@@ -6,7 +6,6 @@ export type PromptTemplate = {
   template: string;
   provider?: ProviderId;
   model?: string;
-  apiUrl?: string;
 };
 
 export type ApiKeys = {
@@ -19,7 +18,6 @@ export type GenerateParams = {
   provider: ProviderId;
   apiKey: string;
   model?: string;
-  apiUrl?: string;
   inputText: string;
   template: string;
   signal?: AbortSignal;

@@ -30,7 +30,6 @@ const errorBanner = requireElement<HTMLDivElement>("popup-error");
 const promptSelect = requireElement<HTMLSelectElement>("popup-prompt-select");
 const input = requireElement<HTMLTextAreaElement>("popup-input");
 const runButton = requireElement<HTMLButtonElement>("popup-run");
-const speechButton = requireElement<HTMLButtonElement>("popup-speech");
 const output = requireElement<HTMLDivElement>("popup-output");
 const settingsButton = requireElement<HTMLButtonElement>("popup-settings");
 const themeButton = requireElement<HTMLButtonElement>("popup-theme");
@@ -40,11 +39,6 @@ let defaultPromptId: string | undefined;
 let inputText = "";
 let outputText = "";
 let busy = false;
-let speechBusy = false;
-let speechPlaying = false;
-let speechAudio: HTMLAudioElement | null = null;
-let speechAudioText = "";
-let speechAudioDataUrl = "";
 let saveTimer: number | null = null;
 let runSeq = 0;
 let themeTouched = false;
@@ -64,10 +58,6 @@ type ActiveRun = {
   port: chrome.runtime.Port;
   disconnectExpected: boolean;
 };
-
-type SpeechResponse =
-  | { ok: true; audioDataUrl: string; cached: boolean }
-  | { ok: false; error: string };
 
 let activeRun: ActiveRun | null = null;
 
@@ -209,100 +199,6 @@ function updateBusy(nextBusy: boolean): void {
   runButton.textContent = nextBusy ? "Stop" : "Run";
   runButton.classList.toggle("btn-danger", nextBusy);
   output.setAttribute("aria-busy", String(nextBusy));
-}
-
-function normalizeSpeechText(text: string): string {
-  return text.trim();
-}
-
-function updateSpeechButton(): void {
-  const hasInput = Boolean(normalizeSpeechText(inputText));
-  speechButton.disabled = speechBusy || !hasInput;
-  speechButton.setAttribute("aria-busy", String(speechBusy));
-
-  if (speechBusy) {
-    speechButton.textContent = "Loading audio";
-    speechButton.setAttribute(
-      "aria-label",
-      "Generating English with AI-generated voice",
-    );
-    return;
-  }
-
-  if (speechPlaying) {
-    speechButton.textContent = "Stop Audio";
-    speechButton.setAttribute("aria-label", "Stop English audio playback");
-    return;
-  }
-
-  speechButton.textContent = "Play English (AI)";
-  speechButton.setAttribute(
-    "aria-label",
-    "Play English with AI-generated voice",
-  );
-}
-
-function stopSpeechPlayback(): void {
-  if (speechAudio) {
-    speechAudio.pause();
-    try {
-      speechAudio.currentTime = 0;
-    } catch {
-      // ignore
-    }
-  }
-  speechPlaying = false;
-  updateSpeechButton();
-}
-
-function clearSpeechAudio(): void {
-  stopSpeechPlayback();
-  if (speechAudio) {
-    speechAudio.onended = null;
-    speechAudio.onerror = null;
-  }
-  speechAudio = null;
-  speechAudioText = "";
-  speechAudioDataUrl = "";
-  updateSpeechButton();
-}
-
-async function playSpeechDataUrl(dataUrl: string, text: string): Promise<void> {
-  if (!speechAudio || speechAudioDataUrl !== dataUrl) {
-    speechAudio = new Audio(dataUrl);
-    speechAudioDataUrl = dataUrl;
-    speechAudioText = text;
-    const activeAudio = speechAudio;
-    activeAudio.onended = () => {
-      if (speechAudio !== activeAudio) return;
-      speechPlaying = false;
-      updateSpeechButton();
-    };
-    activeAudio.onerror = () => {
-      if (speechAudio !== activeAudio) return;
-      speechPlaying = false;
-      updateSpeechButton();
-      setError("Unable to play generated audio.");
-    };
-  }
-
-  try {
-    speechAudio.pause();
-    speechAudio.currentTime = 0;
-  } catch {
-    // ignore
-  }
-
-  speechPlaying = true;
-  updateSpeechButton();
-
-  try {
-    await speechAudio.play();
-  } catch (error) {
-    speechPlaying = false;
-    updateSpeechButton();
-    throw error;
-  }
 }
 
 function applyTheme(nextTheme: "light" | "dark"): void {
@@ -494,52 +390,6 @@ async function run(): Promise<void> {
   }
 }
 
-async function playEnglishSpeech(): Promise<void> {
-  if (speechPlaying) {
-    stopSpeechPlayback();
-    return;
-  }
-  if (speechBusy) return;
-
-  const text = normalizeSpeechText(inputText);
-  if (!text) {
-    updateSpeechButton();
-    return;
-  }
-
-  setError(null);
-
-  if (speechAudioText === text && speechAudioDataUrl) {
-    try {
-      await playSpeechDataUrl(speechAudioDataUrl, text);
-    } catch (error) {
-      setError(formatError(error));
-    }
-    return;
-  }
-
-  speechBusy = true;
-  updateSpeechButton();
-
-  try {
-    const response = (await chrome.runtime?.sendMessage({
-      type: "GENERATE_SPEECH",
-      text,
-    })) as SpeechResponse | undefined;
-    if (!response?.ok) {
-      throw new Error(response?.error ?? "Speech generation failed.");
-    }
-    if (normalizeSpeechText(inputText) !== text) return;
-
-    await playSpeechDataUrl(response.audioDataUrl, text);
-  } catch (error) {
-    setError(formatError(error));
-  } finally {
-    speechBusy = false;
-    updateSpeechButton();
-  }
-}
-
 function isRunShortcut(event: KeyboardEvent): boolean {
   const isEnter =
     event.key === "Enter" ||
@@ -594,11 +444,7 @@ promptSelect.addEventListener("change", () => {
 
 input.addEventListener("input", () => {
   inputText = input.value;
-  if (speechAudioText && normalizeSpeechText(inputText) !== speechAudioText) {
-    clearSpeechAudio();
-  }
   scheduleDraftSave();
-  updateSpeechButton();
 });
 
 output.addEventListener("scroll", () => {
@@ -630,7 +476,6 @@ window.addEventListener("blur", () => {
   runShortcutModifierDown = false;
 });
 window.addEventListener("pagehide", () => {
-  stopSpeechPlayback();
   void saveDraftNow();
 });
 document.addEventListener("visibilitychange", () => {
@@ -647,10 +492,6 @@ runButton.addEventListener("click", () => {
   if (inputText.trim()) {
     void run();
   }
-});
-
-speechButton.addEventListener("click", () => {
-  void playEnglishSpeech();
 });
 
 settingsButton.addEventListener("click", () => {
@@ -721,7 +562,6 @@ async function initialize(): Promise<void> {
 
     renderPromptOptions();
     updateOutput();
-    updateSpeechButton();
     const nextTheme = await getTheme();
     if (!themeTouched) {
       applyTheme(nextTheme);
