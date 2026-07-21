@@ -52,6 +52,10 @@ test("packaged layout matches manifest and static HTML references", async () => 
     "https://generativelanguage.googleapis.com/*",
     "https://api.anthropic.com/*",
   ]);
+  assert.deepEqual(manifest.optional_host_permissions, [
+    "http://*/*",
+    "https://*/*",
+  ]);
   assert.equal(manifest.background.service_worker, "extension/src/background.js");
   assert.equal("content_scripts" in manifest, false);
 
@@ -105,6 +109,9 @@ test("packaged layout matches manifest and static HTML references", async () => 
   assert.match(optionsHtml, /id="saved-banner"/);
   assert.match(optionsHtml, /Keys are saved automatically/);
   assert.doesNotMatch(optionsHtml, /id="keys-save"/);
+  assert.match(optionsHtml, /id="openai-base-url"/);
+  assert.match(optionsHtml, /id="gemini-base-url"/);
+  assert.match(optionsHtml, /id="claude-base-url"/);
   assert.match(optionsHtml, /id="prompt-select"/);
   assert.match(optionsHtml, /id="prompt-name"/);
   assert.match(optionsHtml, /id="prompt-template"/);

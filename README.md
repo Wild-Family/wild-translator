@@ -58,6 +58,21 @@ The workflow builds `extension-dist/`, uploads `release/wild-punch-vX.Y.Z.zip` w
 - Set API keys in **Settings** (options page)
 - Choose a prompt preset and run
 
+## Custom base URL
+Each provider has an optional **Base URL** field in **Settings → API Keys**. Leave
+it empty to use the provider default:
+
+- OpenAI: `https://api.openai.com/v1` (the `/chat/completions` path is appended)
+- Gemini: `https://generativelanguage.googleapis.com`
+- Claude: `https://api.anthropic.com`
+
+Set a custom value to target an OpenAI-compatible gateway, a self-hosted proxy,
+or a local model server (e.g. `http://localhost:11434/v1`). The default hosts are
+covered by the manifest's `host_permissions`; a custom host triggers a one-time
+permission prompt (declared via `optional_host_permissions`) the first time you
+set it. If you dismiss that prompt, requests to that host may fail until access
+is granted.
+
 ## Shortcut
 A command is registered (default `Ctrl+Shift+Y` / `Cmd+Shift+Y`) which opens the UI in a new tab.
 

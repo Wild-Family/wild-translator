@@ -60,6 +60,15 @@ declare namespace chrome {
     function openPopup(): Promise<void>;
   }
 
+  namespace permissions {
+    interface Permissions {
+      origins?: string[];
+      permissions?: string[];
+    }
+    function contains(permissions: Permissions): Promise<boolean>;
+    function request(permissions: Permissions): Promise<boolean>;
+  }
+
   namespace tabs {
     function create(createProperties: { url: string }): Promise<any>;
     function query(queryInfo: Record<string, any>): Promise<any[]>;

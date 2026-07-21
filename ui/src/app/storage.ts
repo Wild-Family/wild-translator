@@ -14,6 +14,7 @@ export async function getAll(): Promise<StorageShape> {
   const raw = await chrome.storage.sync.get(Object.keys(DEFAULTS));
   return {
     apiKeys: raw.apiKeys ?? DEFAULTS.apiKeys,
+    baseUrls: raw.baseUrls ?? DEFAULTS.baseUrls,
     prompts: raw.prompts ?? DEFAULTS.prompts,
     defaultPromptId: raw.defaultPromptId ?? DEFAULTS.defaultPromptId,
   };

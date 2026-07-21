@@ -1,10 +1,17 @@
-import type { ApiKeys, PromptTemplate, ProviderId } from "../app/models.js";
+import type {
+  ApiKeys,
+  BaseUrls,
+  PromptTemplate,
+  ProviderId,
+} from "../app/models.js";
+import { DEFAULT_BASE_URLS } from "../app/models.js";
 import { getAll, setAll } from "../app/storage.js";
 
 type TabId = "keys" | "prompts" | "shortcuts";
 
 type SettingsState = {
   apiKeys: ApiKeys;
+  baseUrls: BaseUrls;
   prompts: PromptTemplate[];
   defaultPromptId: string | undefined;
   selectedPromptId: string | undefined;
@@ -36,6 +43,9 @@ const tabPanels = Array.from(
 const openAiInput = requireElement<HTMLInputElement>("openai-api-key");
 const geminiInput = requireElement<HTMLInputElement>("gemini-api-key");
 const claudeInput = requireElement<HTMLInputElement>("claude-api-key");
+const openAiBaseInput = requireElement<HTMLInputElement>("openai-base-url");
+const geminiBaseInput = requireElement<HTMLInputElement>("gemini-base-url");
+const claudeBaseInput = requireElement<HTMLInputElement>("claude-base-url");
 const cacheCheckbox = requireElement<HTMLInputElement>("cache-enabled");
 const selectionCheckbox = requireElement<HTMLInputElement>(
   "selection-prefill-enabled",
@@ -58,6 +68,7 @@ const themeButton = requireElement<HTMLButtonElement>("theme-button");
 
 const state: SettingsState = {
   apiKeys: {},
+  baseUrls: {},
   prompts: [],
   defaultPromptId: undefined,
   selectedPromptId: undefined,
@@ -68,9 +79,12 @@ const state: SettingsState = {
 };
 
 let promptFieldSync = false;
-let apiKeysSaveTimer: number | null = null;
-let apiKeysSaveChain: Promise<void> = Promise.resolve();
-let savedApiKeysJson = JSON.stringify(state.apiKeys);
+let connectionSaveTimer: number | null = null;
+let connectionSaveChain: Promise<void> = Promise.resolve();
+let savedConnectionJson = JSON.stringify({
+  apiKeys: state.apiKeys,
+  baseUrls: state.baseUrls,
+});
 let promptSaveChain: Promise<void> = Promise.resolve();
 let themeTouched = false;
 let theme: "light" | "dark" = "light";
@@ -151,50 +165,106 @@ function readApiKeysFromInputs(): ApiKeys {
   };
 }
 
-function queueApiKeysPersist(): Promise<void> {
-  const snapshot = { ...state.apiKeys };
-  const nextJson = JSON.stringify(snapshot);
-  if (nextJson === savedApiKeysJson) return Promise.resolve();
+function readBaseUrlsFromInputs(): BaseUrls {
+  return {
+    openai: openAiBaseInput.value.trim() || undefined,
+    gemini: geminiBaseInput.value.trim() || undefined,
+    claude: claudeBaseInput.value.trim() || undefined,
+  };
+}
 
-  const task = apiKeysSaveChain
+function queueConnectionPersist(): Promise<void> {
+  const snapshot = {
+    apiKeys: { ...state.apiKeys },
+    baseUrls: { ...state.baseUrls },
+  };
+  const nextJson = JSON.stringify(snapshot);
+  if (nextJson === savedConnectionJson) return Promise.resolve();
+
+  const task = connectionSaveChain
     .catch(() => undefined)
     .then(async () => {
-      await setAll({ apiKeys: snapshot });
-      savedApiKeysJson = nextJson;
+      await setAll({ apiKeys: snapshot.apiKeys, baseUrls: snapshot.baseUrls });
+      savedConnectionJson = nextJson;
       showSaved("Saved.");
     });
-  apiKeysSaveChain = task;
+  connectionSaveChain = task;
   return task;
 }
 
-function scheduleApiKeysPersist(): void {
-  if (apiKeysSaveTimer !== null) {
-    window.clearTimeout(apiKeysSaveTimer);
+function scheduleConnectionPersist(): void {
+  if (connectionSaveTimer !== null) {
+    window.clearTimeout(connectionSaveTimer);
   }
 
-  apiKeysSaveTimer = window.setTimeout(() => {
-    apiKeysSaveTimer = null;
-    void queueApiKeysPersist().catch((error) => {
+  connectionSaveTimer = window.setTimeout(() => {
+    connectionSaveTimer = null;
+    void queueConnectionPersist().catch((error) => {
       showError(error instanceof Error ? error.message : String(error));
     });
   }, 300);
 }
 
-function flushApiKeysPersist(): void {
-  if (apiKeysSaveTimer !== null) {
-    window.clearTimeout(apiKeysSaveTimer);
-    apiKeysSaveTimer = null;
+function flushConnectionPersist(): void {
+  if (connectionSaveTimer !== null) {
+    window.clearTimeout(connectionSaveTimer);
+    connectionSaveTimer = null;
   }
 
-  void queueApiKeysPersist().catch((error) => {
+  void queueConnectionPersist().catch((error) => {
     showError(error instanceof Error ? error.message : String(error));
   });
 }
 
-function handleApiKeysInput(): void {
+function handleConnectionInput(): void {
   state.apiKeys = readApiKeysFromInputs();
+  state.baseUrls = readBaseUrlsFromInputs();
   showError(null);
-  scheduleApiKeysPersist();
+  scheduleConnectionPersist();
+}
+
+/**
+ * Collect origin match patterns for any custom (non-default) base URL so the
+ * extension can request host access. Default hosts are already covered by the
+ * manifest's `host_permissions`.
+ */
+function customBaseUrlOrigins(): string[] {
+  const origins = new Set<string>();
+  for (const provider of ["openai", "gemini", "claude"] as ProviderId[]) {
+    const value = state.baseUrls[provider]?.trim();
+    if (!value || value === DEFAULT_BASE_URLS[provider]) continue;
+    try {
+      const url = new URL(value);
+      if (url.protocol !== "http:" && url.protocol !== "https:") continue;
+      origins.add(`${url.origin}/*`);
+    } catch {
+      // Ignore invalid URLs; the request will surface a clear error at run time.
+    }
+  }
+  return [...origins];
+}
+
+/**
+ * Best-effort request for host permissions covering custom base URLs. Must run
+ * from a user gesture (a base-URL field `change` event), otherwise Chrome
+ * rejects the prompt. Saving still succeeds regardless of the outcome.
+ */
+async function ensureHostPermissions(): Promise<void> {
+  const origins = customBaseUrlOrigins();
+  if (!origins.length) return;
+  const permissions = chrome.permissions;
+  if (!permissions?.request) return;
+  try {
+    if (await permissions.contains({ origins })) return;
+    const granted = await permissions.request({ origins });
+    if (!granted) {
+      showError(
+        "Host access for the custom base URL was not granted. Requests to that host may fail until you allow it.",
+      );
+    }
+  } catch {
+    // Ignore; the network request will surface a clear error if access is missing.
+  }
 }
 
 async function savePromptPatch(
@@ -224,6 +294,9 @@ function renderKeys(): void {
   openAiInput.value = state.apiKeys.openai ?? "";
   geminiInput.value = state.apiKeys.gemini ?? "";
   claudeInput.value = state.apiKeys.claude ?? "";
+  openAiBaseInput.value = state.baseUrls.openai ?? "";
+  geminiBaseInput.value = state.baseUrls.gemini ?? "";
+  claudeBaseInput.value = state.baseUrls.claude ?? "";
   cacheCheckbox.checked = state.cacheEnabled;
   selectionCheckbox.checked = state.selectionPrefillEnabled;
 }
@@ -320,12 +393,21 @@ for (const button of tabButtons) {
 }
 
 for (const input of [openAiInput, geminiInput, claudeInput]) {
-  input.addEventListener("input", handleApiKeysInput);
-  input.addEventListener("change", flushApiKeysPersist);
-  input.addEventListener("blur", flushApiKeysPersist);
+  input.addEventListener("input", handleConnectionInput);
+  input.addEventListener("change", flushConnectionPersist);
+  input.addEventListener("blur", flushConnectionPersist);
 }
 
-window.addEventListener("pagehide", flushApiKeysPersist);
+for (const input of [openAiBaseInput, geminiBaseInput, claudeBaseInput]) {
+  input.addEventListener("input", handleConnectionInput);
+  input.addEventListener("change", () => {
+    flushConnectionPersist();
+    void ensureHostPermissions();
+  });
+  input.addEventListener("blur", flushConnectionPersist);
+}
+
+window.addEventListener("pagehide", flushConnectionPersist);
 
 cacheCheckbox.addEventListener("change", async () => {
   state.cacheEnabled = cacheCheckbox.checked;
@@ -471,7 +553,11 @@ async function initialize(): Promise<void> {
   try {
     const stored = await getAll();
     state.apiKeys = stored.apiKeys ?? {};
-    savedApiKeysJson = JSON.stringify(state.apiKeys);
+    state.baseUrls = stored.baseUrls ?? {};
+    savedConnectionJson = JSON.stringify({
+      apiKeys: state.apiKeys,
+      baseUrls: state.baseUrls,
+    });
     state.prompts = stored.prompts ?? [];
     state.defaultPromptId =
       getPromptById(stored.defaultPromptId)?.id ?? state.prompts[0]?.id;
