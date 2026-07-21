@@ -4,6 +4,11 @@ import type {
   ProviderId,
 } from "../../shared/src/types.js";
 import { renderPromptTemplate } from "../../shared/src/prompt.js";
+import {
+  resolveClaudeUrl,
+  resolveGeminiUrl,
+  resolveOpenAiUrl,
+} from "../../shared/src/endpoints.js";
 
 export async function generate(
   params: GenerateParams,
@@ -49,12 +54,13 @@ function buildPrompt(template: string, inputText: string) {
 async function openaiGenerate({
   apiKey,
   model,
+  baseUrl,
   inputText,
   template,
   signal,
 }: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
-  const url = "https://api.openai.com/v1/chat/completions";
+  const url = resolveOpenAiUrl(baseUrl);
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -79,12 +85,13 @@ async function openaiGenerate({
 async function* openaiGenerateStream({
   apiKey,
   model,
+  baseUrl,
   inputText,
   template,
   signal,
 }: GenerateParams): AsyncGenerator<string> {
   const prompt = buildPrompt(template, inputText);
-  const url = "https://api.openai.com/v1/chat/completions";
+  const url = resolveOpenAiUrl(baseUrl);
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -113,14 +120,14 @@ async function* openaiGenerateStream({
 async function geminiGenerate({
   apiKey,
   model,
+  baseUrl,
   inputText,
   template,
   signal,
 }: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
   const m = model ?? "gemini-1.5-flash";
-  const base = "https://generativelanguage.googleapis.com";
-  const url = `${base}/v1beta/models/${encodeURIComponent(m)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const url = resolveGeminiUrl(m, apiKey, { baseUrl });
 
   const res = await fetch(url, {
     method: "POST",
@@ -143,15 +150,15 @@ async function geminiGenerate({
 async function* geminiGenerateStream({
   apiKey,
   model,
+  baseUrl,
   inputText,
   template,
   signal,
 }: GenerateParams): AsyncGenerator<string> {
   const prompt = buildPrompt(template, inputText);
   const m = model ?? "gemini-1.5-flash";
-  const base = "https://generativelanguage.googleapis.com";
   // SSE streaming
-  const url = `${base}/v1beta/models/${encodeURIComponent(m)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
+  const url = resolveGeminiUrl(m, apiKey, { baseUrl, stream: true });
 
   const res = await fetch(url, {
     method: "POST",
@@ -177,12 +184,13 @@ async function* geminiGenerateStream({
 async function claudeGenerate({
   apiKey,
   model,
+  baseUrl,
   inputText,
   template,
   signal,
 }: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
-  const url = "https://api.anthropic.com/v1/messages";
+  const url = resolveClaudeUrl(baseUrl);
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -207,12 +215,13 @@ async function claudeGenerate({
 async function* claudeGenerateStream({
   apiKey,
   model,
+  baseUrl,
   inputText,
   template,
   signal,
 }: GenerateParams): AsyncGenerator<string> {
   const prompt = buildPrompt(template, inputText);
-  const url = "https://api.anthropic.com/v1/messages";
+  const url = resolveClaudeUrl(baseUrl);
   const res = await fetch(url, {
     method: "POST",
     headers: {

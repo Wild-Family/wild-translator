@@ -45,9 +45,11 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
 
         const provider = prompt.provider ?? "openai";
         const apiKey = requireApiKey(provider, s.apiKeys);
+        const baseUrl = s.baseUrls?.[provider];
         const cacheKey = await buildCacheKey({
           provider,
           model: prompt.model,
+          baseUrl,
           template: prompt.template,
           inputText,
         });
@@ -64,6 +66,7 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
           provider,
           apiKey,
           model: prompt.model,
+          baseUrl,
           inputText,
           template: prompt.template,
         });
@@ -152,9 +155,11 @@ chrome.runtime.onConnect.addListener((port) => {
 
         const provider = prompt.provider ?? "openai";
         const apiKey = requireApiKey(provider, s.apiKeys);
+        const baseUrl = s.baseUrls?.[provider];
         const cacheKey = await buildCacheKey({
           provider,
           model: prompt.model,
+          baseUrl,
           template: prompt.template,
           inputText,
         });
@@ -177,6 +182,7 @@ chrome.runtime.onConnect.addListener((port) => {
           provider,
           apiKey,
           model: prompt.model,
+          baseUrl,
           inputText,
           template: prompt.template,
           signal: abortController.signal,

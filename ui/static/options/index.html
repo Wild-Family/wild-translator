@@ -210,6 +210,16 @@
                 />
               </label>
               <label class="wt-label">
+                OpenAI Base URL (optional)
+                <input
+                  id="openai-base-url"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="https://api.openai.com/v1"
+                />
+              </label>
+              <label class="wt-label">
                 Gemini API Key
                 <input
                   id="gemini-api-key"
@@ -219,12 +229,32 @@
                 />
               </label>
               <label class="wt-label">
+                Gemini Base URL (optional)
+                <input
+                  id="gemini-base-url"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="https://generativelanguage.googleapis.com"
+                />
+              </label>
+              <label class="wt-label">
                 Claude API Key
                 <input
                   id="claude-api-key"
                   type="password"
                   autocomplete="off"
                   placeholder="sk-ant-..."
+                />
+              </label>
+              <label class="wt-label">
+                Claude Base URL (optional)
+                <input
+                  id="claude-base-url"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="https://api.anthropic.com"
                 />
               </label>
 
@@ -240,6 +270,11 @@
               <p class="wt-note">
                 Keys are saved automatically in <code>chrome.storage.sync</code>
                 on your browser profile.
+              </p>
+              <p class="wt-note">
+                Leave a Base URL empty to use the provider default. Custom hosts
+                (e.g. an OpenAI-compatible gateway or local proxy) will prompt for
+                access permission the first time you set them.
               </p>
             </div>
           </section>

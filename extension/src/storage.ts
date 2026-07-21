@@ -1,13 +1,15 @@
-import type { ApiKeys, PromptTemplate } from "../../shared/src/types.js";
+import type { ApiKeys, BaseUrls, PromptTemplate } from "../../shared/src/types.js";
 
 export type StorageShape = {
   apiKeys: ApiKeys;
+  baseUrls: BaseUrls;
   prompts: PromptTemplate[];
   defaultPromptId?: string;
 };
 
 const DEFAULTS: StorageShape = {
   apiKeys: {},
+  baseUrls: {},
   prompts: [
     {
       id: "default-translate",
@@ -24,6 +26,7 @@ export const storage = {
     const raw = await chrome.storage.sync.get(Object.keys(DEFAULTS));
     return {
       apiKeys: (raw.apiKeys ?? DEFAULTS.apiKeys) as ApiKeys,
+      baseUrls: (raw.baseUrls ?? DEFAULTS.baseUrls) as BaseUrls,
       prompts: (raw.prompts ?? DEFAULTS.prompts) as PromptTemplate[],
       defaultPromptId: (raw.defaultPromptId ??
         DEFAULTS.defaultPromptId) as string,

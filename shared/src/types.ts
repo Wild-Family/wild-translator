@@ -14,10 +14,17 @@ export type ApiKeys = {
   claude?: string;
 };
 
+export type BaseUrls = {
+  openai?: string;
+  gemini?: string;
+  claude?: string;
+};
+
 export type GenerateParams = {
   provider: ProviderId;
   apiKey: string;
   model?: string;
+  baseUrl?: string;
   inputText: string;
   template: string;
   signal?: AbortSignal;

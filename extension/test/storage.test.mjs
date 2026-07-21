@@ -29,6 +29,17 @@ test("storage.getAll returns defaults when empty", async () => {
   const state = await storage.getAll();
   assert.ok(state.prompts.length > 0);
   assert.ok(state.defaultPromptId);
+  assert.deepEqual(state.apiKeys, {});
+  assert.deepEqual(state.baseUrls, {});
+});
+
+test("storage.setAll persists base URLs", async () => {
+  const syncStore = {};
+  installChromeMock(syncStore);
+
+  await storage.setAll({ baseUrls: { openai: "http://localhost:11434/v1" } });
+  const state = await storage.getAll();
+  assert.equal(state.baseUrls.openai, "http://localhost:11434/v1");
 });
 
 test("storage.setAll persists values", async () => {
