@@ -1,20 +1,6 @@
+import { renderMarkdown } from "../app/markdown.js";
 import type { PromptTemplate } from "../app/models.js";
 import { getAll, setAll } from "../app/storage.js";
-
-function stripMarkdown(text: string): string {
-  return text
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/\*\*(.+?)\*\*/g, "$1")
-    .replace(/\*(.+?)\*/g, "$1")
-    .replace(/__(.+?)__/g, "$1")
-    .replace(/_(.+?)_/g, "$1")
-    .replace(/~~(.+?)~~/g, "$1")
-    .replace(/`(.+?)`/g, "$1")
-    .replace(/^>\s+/gm, "")
-    .replace(/^[-*+]\s+/gm, "")
-    .replace(/^\d+\.\s+/gm, "")
-    .replace(/\[(.+?)\]\(.+?\)/g, "$1");
-}
 
 function requireElement<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -134,7 +120,11 @@ function scheduleDraftSave(): void {
 }
 
 function updateOutput(): void {
-  output.textContent = stripMarkdown(outputText) || "Output";
+  if (outputText) {
+    output.replaceChildren(renderMarkdown(outputText));
+  } else {
+    output.textContent = "Output";
+  }
   if (outputAutoScroll) {
     output.scrollTop = output.scrollHeight;
   }

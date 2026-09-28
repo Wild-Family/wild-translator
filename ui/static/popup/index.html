@@ -135,10 +135,106 @@
         border-radius: 8px;
         padding: 10px;
         min-height: 0;
-        white-space: pre-wrap;
-        line-height: 1.5;
+        line-height: 1.55;
         overflow-y: auto;
         overflow-wrap: anywhere;
+      }
+
+      .popup-output > * + *,
+      .popup-output blockquote > * + *,
+      .popup-output li > * + * {
+        margin-top: 0.5em;
+      }
+
+      .popup-output h1,
+      .popup-output h2,
+      .popup-output h3,
+      .popup-output h4,
+      .popup-output h5,
+      .popup-output h6 {
+        line-height: 1.3;
+        font-weight: 600;
+      }
+
+      .popup-output h1 {
+        font-size: 1.25em;
+      }
+
+      .popup-output h2 {
+        font-size: 1.15em;
+      }
+
+      .popup-output h3 {
+        font-size: 1.05em;
+      }
+
+      .popup-output h4,
+      .popup-output h5,
+      .popup-output h6 {
+        font-size: 1em;
+      }
+
+      .popup-output code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.9em;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 1px 4px;
+      }
+
+      .popup-output pre {
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px 10px;
+        overflow-x: auto;
+      }
+
+      .popup-output pre code {
+        background: none;
+        border: none;
+        padding: 0;
+        font-size: 0.85em;
+        white-space: pre;
+      }
+
+      .popup-output blockquote {
+        border-left: 3px solid var(--border);
+        padding-left: 10px;
+        color: var(--muted);
+      }
+
+      .popup-output ul,
+      .popup-output ol {
+        padding-left: 1.4em;
+      }
+
+      .popup-output li + li {
+        margin-top: 0.2em;
+      }
+
+      .popup-output table {
+        border-collapse: collapse;
+        font-size: 0.95em;
+        display: block;
+        overflow-x: auto;
+      }
+
+      .popup-output th,
+      .popup-output td {
+        border: 1px solid var(--border);
+        padding: 4px 8px;
+        text-align: left;
+      }
+
+      .popup-output th {
+        background: var(--surface-muted);
+      }
+
+      .popup-output hr {
+        border: none;
+        border-top: 1px solid var(--border);
       }
 
       .popup-theme {
