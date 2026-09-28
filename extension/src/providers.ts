@@ -51,6 +51,62 @@ function buildPrompt(template: string, inputText: string) {
   return renderPromptTemplate(template, { text: inputText });
 }
 
+// OpenAI reasoning models (o-series, gpt-5 and later) reject any temperature
+// other than the default of 1, so the parameter must be omitted for them.
+export function supportsCustomTemperature(model: string): boolean {
+  return !/^(o\d|gpt-(?:[5-9]|\d{2,}))/u.test(model);
+}
+
+export function isUnsupportedTemperatureError(
+  status: number,
+  bodyText: string,
+): boolean {
+  if (status !== 400) return false;
+  try {
+    const error = (JSON.parse(bodyText) as any)?.error;
+    return (
+      error?.param === "temperature" && error?.code === "unsupported_value"
+    );
+  } catch {
+    return false;
+  }
+}
+
+// The model-name check above is a heuristic; when it misses a model that
+// rejects custom temperatures, retry once without the parameter.
+async function openaiFetch(
+  url: string,
+  apiKey: string,
+  signal: AbortSignal | undefined,
+  model: string,
+  baseBody: Record<string, unknown>,
+): Promise<Response> {
+  const request = (withTemperature: boolean) =>
+    fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal,
+      body: JSON.stringify({
+        ...baseBody,
+        ...(withTemperature ? { temperature: 0.2 } : {}),
+      }),
+    });
+
+  let res = await request(supportsCustomTemperature(model));
+  if (!res.ok) {
+    const text = await res.text();
+    if (!isUnsupportedTemperatureError(res.status, text))
+      throw new Error(`OpenAI error: ${res.status} ${text}`);
+    res = await request(false);
+    if (!res.ok)
+      throw new Error(`OpenAI error: ${res.status} ${await res.text()}`);
+  }
+  return res;
+}
+
 async function openaiGenerate({
   apiKey,
   model,
@@ -61,22 +117,12 @@ async function openaiGenerate({
 }: GenerateParams): Promise<GenerateResult> {
   const prompt = buildPrompt(template, inputText);
   const url = resolveOpenAiUrl(baseUrl);
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    signal,
-    body: JSON.stringify({
-      model: model ?? "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.2,
-    }),
+  const resolvedModel = model ?? "gpt-4o-mini";
+  const res = await openaiFetch(url, apiKey, signal, resolvedModel, {
+    model: resolvedModel,
+    messages: [{ role: "user", content: prompt }],
   });
 
-  if (!res.ok)
-    throw new Error(`OpenAI error: ${res.status} ${await res.text()}`);
   const data = (await res.json()) as any;
   const text = data?.choices?.[0]?.message?.content ?? "";
   return { text };
@@ -92,22 +138,12 @@ async function* openaiGenerateStream({
 }: GenerateParams): AsyncGenerator<string> {
   const prompt = buildPrompt(template, inputText);
   const url = resolveOpenAiUrl(baseUrl);
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    signal,
-    body: JSON.stringify({
-      model: model ?? "gpt-4o-mini",
-      stream: true,
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.2,
-    }),
+  const resolvedModel = model ?? "gpt-4o-mini";
+  const res = await openaiFetch(url, apiKey, signal, resolvedModel, {
+    model: resolvedModel,
+    stream: true,
+    messages: [{ role: "user", content: prompt }],
   });
-  if (!res.ok)
-    throw new Error(`OpenAI error: ${res.status} ${await res.text()}`);
   if (!res.body) throw new Error("OpenAI stream: missing response body");
 
   for await (const data of readSseJson(res.body)) {
