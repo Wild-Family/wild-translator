@@ -35,6 +35,7 @@ test("packaged layout matches manifest and static HTML references", async () => 
     "extension-dist/ui/src/index.js",
     "extension-dist/ui/src/popup/index.js",
     "extension-dist/ui/src/options/index.js",
+    "extension-dist/ui/src/app/markdown.js",
     "extension-dist/extension/src/background.js",
   ];
 
