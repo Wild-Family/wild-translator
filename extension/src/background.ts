@@ -1,3 +1,4 @@
+import type { GenerateRequest } from "../../shared/src/types.js";
 import {
   generate,
   generateStream,
@@ -5,11 +6,7 @@ import {
 } from "./providers.js";
 import { storage } from "./storage.js";
 
-type GenerateMessage = {
-  type: "GENERATE";
-  inputText: string;
-  promptId?: string;
-};
+type GenerateMessage = GenerateRequest & { type: "GENERATE" };
 
 type OpenUiWithTextMessage = {
   type: "OPEN_UI_WITH_TEXT";
@@ -37,10 +34,12 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
   if (msg.type === "GENERATE") {
     (async () => {
       try {
-        const { inputText, promptId } = msg as GenerateMessage;
+        const { inputText, promptId, prompt: promptSnapshot, history } =
+          msg as GenerateMessage;
         const s = await storage.getAll();
         const pid = promptId ?? s.defaultPromptId ?? s.prompts[0]?.id;
-        const prompt = s.prompts.find((p) => p.id === pid) ?? s.prompts[0];
+        const prompt =
+          promptSnapshot ?? s.prompts.find((p) => p.id === pid) ?? s.prompts[0];
         if (!prompt) throw new Error("No prompt configured");
 
         const provider = prompt.provider ?? "openai";
@@ -52,6 +51,7 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
           baseUrl,
           template: prompt.template,
           inputText,
+          ...(history?.length ? { history } : {}),
         });
         const cached = await cacheGet(cacheKey);
         if (cached) {
@@ -69,6 +69,7 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
           baseUrl,
           inputText,
           template: prompt.template,
+          history,
         });
 
         await cacheSet(cacheKey, result.text);
@@ -143,14 +144,12 @@ chrome.runtime.onConnect.addListener((port) => {
       activeAbortController = abortController;
 
       try {
-        const { inputText, promptId } = msg as {
-          type: "GENERATE_STREAM";
-          inputText: string;
-          promptId?: string;
-        };
+        const { inputText, promptId, prompt: promptSnapshot, history } =
+          msg as GenerateRequest;
         const s = await storage.getAll();
         const pid = promptId ?? s.defaultPromptId ?? s.prompts[0]?.id;
-        const prompt = s.prompts.find((p) => p.id === pid) ?? s.prompts[0];
+        const prompt =
+          promptSnapshot ?? s.prompts.find((p) => p.id === pid) ?? s.prompts[0];
         if (!prompt) throw new Error("No prompt configured");
 
         const provider = prompt.provider ?? "openai";
@@ -162,6 +161,7 @@ chrome.runtime.onConnect.addListener((port) => {
           baseUrl,
           template: prompt.template,
           inputText,
+          ...(history?.length ? { history } : {}),
         });
         const cached = await cacheGet(cacheKey);
         if (cached) {
@@ -185,6 +185,7 @@ chrome.runtime.onConnect.addListener((port) => {
           baseUrl,
           inputText,
           template: prompt.template,
+          history,
           signal: abortController.signal,
         })) {
           if (abortController.signal.aborted) return;
@@ -283,7 +284,7 @@ async function cacheGet(key: string): Promise<CacheEntry | null> {
     const store = await chrome.storage.local.get([CACHE_KEY]);
     const cache = (store?.[CACHE_KEY] ?? {}) as Record<string, CacheEntry>;
     const hit = cache[key];
-    if (!hit) return null;
+    if (!hit || !hit.text.trim()) return null;
     return hit;
   } catch {
     return null;
@@ -291,6 +292,7 @@ async function cacheGet(key: string): Promise<CacheEntry | null> {
 }
 
 async function cacheSet(key: string, text: string): Promise<void> {
+  if (!text.trim()) return;
   try {
     const enabled = await cacheEnabled();
     if (!enabled) return;

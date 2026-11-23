@@ -20,6 +20,18 @@ export type BaseUrls = {
   claude?: string;
 };
 
+export type ConversationMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type GenerateRequest = {
+  inputText: string;
+  promptId?: string;
+  prompt?: PromptTemplate;
+  history?: ConversationMessage[];
+};
+
 export type GenerateParams = {
   provider: ProviderId;
   apiKey: string;
@@ -27,6 +39,7 @@ export type GenerateParams = {
   baseUrl?: string;
   inputText: string;
   template: string;
+  history?: ConversationMessage[];
   signal?: AbortSignal;
 };
 

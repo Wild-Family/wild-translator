@@ -1,4 +1,7 @@
 import { renderMarkdown } from "../app/markdown.js";
+import { restoreConversation } from "../app/conversation.js";
+import type { Conversation } from "../app/conversation.js";
+import { buildConversationMessages } from "../../../shared/src/conversation.js";
 import type { PromptTemplate } from "../app/models.js";
 import { getAll, setAll } from "../app/storage.js";
 
@@ -17,13 +20,17 @@ const promptSelect = requireElement<HTMLSelectElement>("popup-prompt-select");
 const input = requireElement<HTMLTextAreaElement>("popup-input");
 const runButton = requireElement<HTMLButtonElement>("popup-run");
 const output = requireElement<HTMLDivElement>("popup-output");
+const followUpForm = requireElement<HTMLFormElement>("popup-follow-up-form");
+const followUpInput = requireElement<HTMLTextAreaElement>("popup-follow-up");
+const followUpButton = requireElement<HTMLButtonElement>("popup-send");
 const settingsButton = requireElement<HTMLButtonElement>("popup-settings");
 const themeButton = requireElement<HTMLButtonElement>("popup-theme");
 
 let prompts: PromptTemplate[] = [];
 let defaultPromptId: string | undefined;
 let inputText = "";
-let outputText = "";
+let conversation: Conversation | null = null;
+let followUpText = "";
 let busy = false;
 let saveTimer: number | null = null;
 let runSeq = 0;
@@ -43,6 +50,8 @@ type ActiveRun = {
   token: number;
   port: chrome.runtime.Port;
   disconnectExpected: boolean;
+  previousConversation: Conversation | null;
+  previousFollowUp: string;
 };
 
 let activeRun: ActiveRun | null = null;
@@ -89,8 +98,10 @@ function getDraftSnapshot() {
   return {
     popupDraft: {
       input: inputText,
-      output: outputText,
+      output: currentReply()?.content ?? "",
       promptId: resolvePromptId(defaultPromptId),
+      conversation,
+      followUp: followUpText,
     },
   };
 }
@@ -119,12 +130,40 @@ function scheduleDraftSave(): void {
   }, 250);
 }
 
+function currentReply() {
+  return conversation?.messages.at(-1);
+}
+
+function updateFollowUp(): void {
+  followUpForm.hidden = !conversation?.messages.some(
+    (message) => message.role === "assistant" && message.content.trim(),
+  );
+  main.classList.toggle("has-conversation", !followUpForm.hidden);
+  followUpInput.disabled = busy;
+  followUpButton.disabled = busy || !followUpText.trim();
+}
+
 function updateOutput(): void {
-  if (outputText) {
-    output.replaceChildren(renderMarkdown(outputText));
+  if (conversation) {
+    const fragment = document.createDocumentFragment();
+    for (const message of conversation.messages.slice(1)) {
+      const section = document.createElement("section");
+      section.className = `popup-message popup-message-${message.role}`;
+      section.setAttribute("aria-label", message.role === "user" ? "You" : "AI");
+      if (message.role === "user") {
+        section.textContent = message.content;
+      } else if (message.content) {
+        section.append(renderMarkdown(message.content));
+      } else {
+        section.textContent = busy ? "Thinking…" : "No response received.";
+      }
+      fragment.append(section);
+    }
+    output.replaceChildren(fragment);
   } else {
     output.textContent = "Output";
   }
+  updateFollowUp();
   if (outputAutoScroll) {
     output.scrollTop = output.scrollHeight;
   }
@@ -163,7 +202,8 @@ function flushStreamQueue(): void {
 
   const next = streamQueue.slice(0, STREAM_CHUNK_SIZE);
   streamQueue = streamQueue.slice(STREAM_CHUNK_SIZE);
-  outputText += next;
+  const reply = currentReply();
+  if (reply) reply.content += next;
   updateOutput();
   scheduleDraftSave();
   streamTimer = window.setTimeout(flushStreamQueue, STREAM_CHUNK_DELAY_MS);
@@ -189,6 +229,9 @@ function updateBusy(nextBusy: boolean): void {
   runButton.textContent = nextBusy ? "Stop" : "Run";
   runButton.classList.toggle("btn-danger", nextBusy);
   output.setAttribute("aria-busy", String(nextBusy));
+  input.readOnly = nextBusy;
+  promptSelect.disabled = nextBusy || prompts.length === 0;
+  updateFollowUp();
 }
 
 function applyTheme(nextTheme: "light" | "dark"): void {
@@ -270,29 +313,52 @@ async function stop(): Promise<void> {
   }
 
   currentRun.disconnectExpected = true;
+  const reply = currentReply();
+  if (reply) reply.content += streamQueue;
+  clearStreamQueue();
+  if (!reply?.content.trim()) {
+    conversation = currentRun.previousConversation;
+    followUpText = currentRun.previousFollowUp;
+    followUpInput.value = followUpText;
+  }
   try {
     currentRun.port.disconnect();
   } catch {
     // ignore
   }
-  clearStreamQueue();
-
   if (activeRun?.token === currentRun.token) {
     activeRun = null;
   }
   updateBusy(false);
+  updateOutput();
   await saveDraftNow();
 }
 
-async function run(): Promise<void> {
-  if (busy || !inputText.trim()) return;
+async function run(question?: string): Promise<void> {
+  if (busy) return;
+  const isFollowUp = question !== undefined;
+  const requestInput = isFollowUp ? question.trim() : inputText;
+  const prompt = isFollowUp
+    ? conversation?.prompt
+    : prompts.find((item) => item.id === resolvePromptId(defaultPromptId));
+  if (!requestInput.trim() || !prompt) return;
+  const previousConversation = structuredClone(conversation);
+  const previousFollowUp = followUpText;
+  const history = isFollowUp ? conversation?.messages ?? [] : [];
 
   const token = ++runSeq;
-  const nextPromptId = resolvePromptId(defaultPromptId);
 
   setError(null);
+  conversation = {
+    prompt: { ...prompt },
+    messages: [
+      ...buildConversationMessages(prompt.template, requestInput, history),
+      { role: "assistant", content: "" },
+    ],
+  };
+  followUpText = "";
+  followUpInput.value = "";
   updateBusy(true);
-  outputText = "";
   outputAutoScroll = true;
   clearStreamQueue();
   updateOutput();
@@ -304,6 +370,8 @@ async function run(): Promise<void> {
       token,
       port: nextPort,
       disconnectExpected: false,
+      previousConversation,
+      previousFollowUp,
     };
     activeRun = runState;
 
@@ -334,20 +402,17 @@ async function run(): Promise<void> {
           enqueueStreamText(String(message.delta ?? ""));
         }
         if (message?.type === "STREAM_ERROR") {
-          runState.disconnectExpected = true;
-          clearStreamQueue();
-          void saveDraftNow();
-          try {
-            nextPort.disconnect();
-          } catch {
-            // ignore
-          }
           settle(() => {
             reject(new Error(String(message.error ?? "Stream error")));
           });
         }
         if (message?.type === "STREAM_END") {
           void waitForStreamFlush().then(async () => {
+            if (activeRun?.token !== token) return;
+            if (!currentReply()?.content.trim()) {
+              settle(() => reject(new Error("No response received. Try again.")));
+              return;
+            }
             await saveDraftNow();
             runState.disconnectExpected = true;
             try {
@@ -362,19 +427,34 @@ async function run(): Promise<void> {
 
       nextPort.postMessage({
         type: "GENERATE_STREAM",
-        inputText,
-        promptId: nextPromptId,
+        inputText: requestInput,
+        promptId: prompt.id,
+        prompt,
+        history,
       });
     });
   } catch (error) {
-    if (activeRun?.token === token) {
+    if (runSeq === token && busy) {
+      clearStreamQueue();
+      conversation = previousConversation;
+      followUpText = previousFollowUp;
+      followUpInput.value = followUpText;
       setError(formatError(error));
     }
   } finally {
-    if (activeRun?.token === token) {
+    if (activeRun?.token === token || (runSeq === token && busy)) {
+      if (activeRun) {
+        activeRun.disconnectExpected = true;
+        try {
+          activeRun.port.disconnect();
+        } catch {
+          // The port may already have disconnected.
+        }
+      }
       activeRun = null;
-      updateOutput();
       updateBusy(false);
+      updateOutput();
+      if (isFollowUp) followUpInput.focus();
       void saveDraftNow();
     }
   }
@@ -397,6 +477,7 @@ function isRunShortcut(event: KeyboardEvent): boolean {
 }
 
 function handleRunShortcut(event: KeyboardEvent): void {
+  if (event.repeat || event.isComposing || event.keyCode === 229) return;
   if (event.metaKey || event.ctrlKey) {
     runShortcutModifierDown = true;
   }
@@ -415,11 +496,10 @@ function handleRunShortcut(event: KeyboardEvent): void {
     void stop();
     return;
   }
-  void run();
+  void run(event.target === followUpInput ? followUpText : undefined);
 }
 
 function handleShortcutKeyup(event: KeyboardEvent): void {
-  handleRunShortcut(event);
   if (event.key === "Meta" || event.key === "Control") {
     runShortcutModifierDown = false;
   }
@@ -437,6 +517,17 @@ input.addEventListener("input", () => {
   scheduleDraftSave();
 });
 
+followUpInput.addEventListener("input", () => {
+  followUpText = followUpInput.value;
+  updateFollowUp();
+  scheduleDraftSave();
+});
+
+followUpForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void run(followUpText);
+});
+
 output.addEventListener("scroll", () => {
   outputAutoScroll = isOutputAtBottom();
 });
@@ -446,7 +537,7 @@ output.addEventListener("touchstart", disableOutputAutoScroll, {
   passive: true,
 });
 
-input.addEventListener("keydown", (event) => {
+window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && busy) {
     event.preventDefault();
     void stop();
@@ -455,13 +546,10 @@ input.addEventListener("keydown", (event) => {
 
 window.addEventListener("keydown", handleRunShortcut, true);
 window.addEventListener("keyup", handleShortcutKeyup, true);
-window.addEventListener("keypress", handleRunShortcut, true);
 document.addEventListener("keydown", handleRunShortcut, true);
 document.addEventListener("keyup", handleShortcutKeyup, true);
-document.addEventListener("keypress", handleRunShortcut, true);
 input.addEventListener("keydown", handleRunShortcut, true);
 input.addEventListener("keyup", handleShortcutKeyup, true);
-input.addEventListener("keypress", handleRunShortcut, true);
 window.addEventListener("blur", () => {
   runShortcutModifierDown = false;
 });
@@ -532,9 +620,6 @@ async function initialize(): Promise<void> {
       }
       await clearDraftText(store);
 
-      if (saved?.output) {
-        outputText = saved.output;
-      }
       if (saved?.promptId) {
         defaultPromptId = resolvePromptId(saved.promptId);
       }
@@ -543,6 +628,32 @@ async function initialize(): Promise<void> {
           inputText = saved.input;
           input.value = saved.input;
         }
+      }
+      if (!hasSelectionDraft) {
+        conversation = restoreConversation(saved?.conversation);
+        // Keep output saved before conversation support was introduced.
+        if (!conversation && typeof saved?.output === "string" && saved.output) {
+          const prompt = prompts.find((item) => item.id === defaultPromptId);
+          if (prompt && typeof saved.input === "string") {
+            conversation = {
+              prompt: { ...prompt },
+              messages: [
+                ...buildConversationMessages(prompt.template, saved.input),
+                { role: "assistant", content: saved.output },
+              ],
+            };
+          }
+        }
+        followUpText = typeof saved?.followUp === "string" ? saved.followUp : "";
+        if (conversation && !currentReply()?.content.trim()) {
+          if (conversation.messages.length > 2) {
+            followUpText ||= conversation.messages.at(-2)?.content ?? "";
+            conversation.messages.splice(-2);
+          } else {
+            conversation = null;
+          }
+        }
+        followUpInput.value = followUpText;
       }
     } catch {
       // ignore

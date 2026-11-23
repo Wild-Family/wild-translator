@@ -25,7 +25,7 @@ function storageArea(values = {}) {
       );
     },
     async set(next) {
-      Object.assign(values, next);
+      Object.assign(values, structuredClone(next));
     },
     async remove(keys) {
       for (const key of keys) delete values[key];
@@ -54,9 +54,12 @@ class Element extends EventTarget {
   setSelectionRange() {}
 }
 
-async function setup(t, { local = {}, session = {}, rejectPopup = false } = {}) {
+async function setup(t, {
+  local = {}, session = {}, rejectPopup = false, manualStream = false,
+} = {}) {
   const timers = new Set();
   const requests = [];
+  const ports = [];
   const opened = [];
   const previousGlobals = {
     chrome: globalThis.chrome,
@@ -98,12 +101,21 @@ async function setup(t, { local = {}, session = {}, rejectPopup = false } = {}) 
     for (let attempt = 0; attempt < 200; attempt++) {
       if (elements.get("popup-loading").hidden) {
         await delay(0);
+        if (!manualStream) await waitForIdle();
         assert.equal(elements.get("popup-error").textContent, "");
         return;
       }
       await delay(5);
     }
     assert.fail("Popup did not finish initializing");
+  }
+
+  async function waitForIdle() {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      if (elements.get("popup-run").textContent !== "Stop") return;
+      await delay(5);
+    }
+    assert.fail("Generation did not finish");
   }
 
   const chrome = {
@@ -143,10 +155,16 @@ async function setup(t, { local = {}, session = {}, rejectPopup = false } = {}) 
           },
           postMessage(message) {
             assert.equal(elements.get("popup-loading").hidden, true);
-            requests.push(message);
-            queueMicrotask(() => void port.onMessage.emit({ type: "STREAM_END" }));
+            requests.push(structuredClone(message));
+            if (!manualStream) {
+              queueMicrotask(async () => {
+                await port.onMessage.emit({ type: "STREAM_DELTA", delta: "OK" });
+                await port.onMessage.emit({ type: "STREAM_END" });
+              });
+            }
           },
         };
+        ports.push(port);
         return port;
       },
     },
@@ -175,6 +193,28 @@ async function setup(t, { local = {}, session = {}, rejectPopup = false } = {}) 
     requests,
     opened,
     openPopup,
+    waitForIdle,
+    respond: (message) => ports.at(-1).onMessage.emit(message),
+    type(id, value) {
+      const element = elements.get(id);
+      element.value = value;
+      element.dispatchEvent(new Event("input"));
+    },
+    submit() {
+      elements.get("popup-follow-up-form").dispatchEvent(
+        new Event("submit", { cancelable: true }),
+      );
+    },
+    shortcut(type, properties = {}) {
+      const event = new Event(type, { cancelable: true });
+      Object.defineProperties(event, Object.fromEntries(
+        Object.entries({
+          key: "Enter", ctrlKey: true,
+          target: elements.get("popup-follow-up"), ...properties,
+        }).map(([key, value]) => [key, { value }]),
+      ));
+      window.dispatchEvent(event);
+    },
     element: (id) => elements.get(id),
     rightClick: (text) => chrome.contextMenus.onClicked.emit({
       menuItemId: "wild:open",
@@ -196,9 +236,11 @@ test("context-menu translation runs automatically after restoring the selected p
     type: "GENERATE_STREAM",
     inputText: "Selected text",
     promptId: "custom",
+    prompt: { id: "custom", name: "Custom", template: "{{text}}" },
+    history: [],
   }]);
   assert.equal(popup.element("popup-input").value, "Selected text");
-  assert.equal(popup.element("popup-output").textContent, "Output");
+  assert.equal(popup.element("popup-output").textContent, "OK");
 });
 
 test("opening the popup normally restores the draft without running", async (t) => {
@@ -276,3 +318,118 @@ for (const text of ["", " \n\t"]) {
     assert.equal(popup.element("popup-input").value, text);
   });
 }
+
+function savedConversation() {
+  return {
+    popupDraft: {
+      input: "hello",
+      output: "こんにちは",
+      promptId: "translate",
+      conversation: {
+        prompt: {
+          id: "translate", name: "Translate", template: "Translate: {{text}}",
+          provider: "claude", model: "original-model",
+        },
+        messages: [
+          { role: "user", content: "Translate: hello" },
+          { role: "assistant", content: "こんにちは" },
+        ],
+      },
+    },
+  };
+}
+
+async function finish(popup, text) {
+  if (text !== undefined) {
+    await popup.respond({ type: "STREAM_DELTA", delta: text });
+  }
+  await popup.respond({ type: "STREAM_END" });
+  await popup.waitForIdle();
+}
+
+test("follow-ups keep the original preset and history after input/preset edits and reopening", async (t) => {
+  const local = savedConversation();
+  const original = structuredClone(local.popupDraft.conversation);
+  const popup = await setup(t, { local, manualStream: true });
+  await popup.openPopup();
+  popup.type("popup-input", "Changed input");
+  popup.element("popup-prompt-select").value = "custom";
+  popup.element("popup-prompt-select").dispatchEvent(new Event("change"));
+  popup.type("popup-follow-up", "Why?");
+  popup.submit();
+
+  assert.deepEqual(popup.requests[0].history, original.messages);
+  assert.deepEqual(popup.requests[0].prompt, original.prompt);
+  assert.equal(popup.requests[0].inputText, "Why?");
+  await finish(popup, "First answer");
+  popup.type("popup-follow-up", "Unsent question");
+  window.dispatchEvent(new Event("pagehide"));
+  await popup.openPopup();
+
+  assert.equal(popup.element("popup-follow-up").value, "Unsent question");
+  popup.submit();
+  assert.equal(popup.requests[1].history.length, 4);
+  assert.deepEqual(popup.requests[1].prompt, original.prompt);
+  await finish(popup, "Second answer");
+});
+
+test("an empty response restores the conversation and question before retrying", async (t) => {
+  const local = savedConversation();
+  const original = structuredClone(local.popupDraft.conversation);
+  const popup = await setup(t, { local, manualStream: true });
+  await popup.openPopup();
+  popup.type("popup-follow-up", "Why?");
+  popup.submit();
+  await finish(popup);
+
+  assert.deepEqual(local.popupDraft.conversation, original);
+  assert.equal(popup.element("popup-follow-up").value, "Why?");
+  assert.match(popup.element("popup-error").textContent, /no response/i);
+  popup.submit();
+  assert.deepEqual(popup.requests[1].history, original.messages);
+  await finish(popup, "Retry answer");
+});
+
+for (const keyEvent of ["repeat", "keyup"]) {
+  test(`Ctrl+Enter ${keyEvent} does not stop an active follow-up`, async (t) => {
+    const popup = await setup(t, { local: savedConversation(), manualStream: true });
+    await popup.openPopup();
+    let now = 1000;
+    t.mock.method(Date, "now", () => now);
+    popup.type("popup-follow-up", "Why?");
+    popup.shortcut("keydown");
+    assert.equal(popup.requests.length, 1);
+    now += 500;
+    popup.shortcut(keyEvent === "repeat" ? "keydown" : "keyup", {
+      repeat: keyEvent === "repeat",
+    });
+
+    assert.equal(popup.element("popup-run").textContent, "Stop");
+    assert.equal(popup.requests.length, 1);
+    await finish(popup, "Answer");
+  });
+}
+
+test("confirming an IME composition does not submit the follow-up on keyup", async (t) => {
+  const popup = await setup(t, { local: savedConversation(), manualStream: true });
+  await popup.openPopup();
+  popup.type("popup-follow-up", "日本語の質問");
+  popup.shortcut("keydown", { isComposing: true });
+  popup.shortcut("keyup", { isComposing: false });
+  assert.equal(popup.requests.length, 0);
+});
+
+test("a provider error after partial output restores the previous conversation and draft", async (t) => {
+  const local = savedConversation();
+  const original = structuredClone(local.popupDraft.conversation);
+  const popup = await setup(t, { local, manualStream: true });
+  await popup.openPopup();
+  popup.type("popup-follow-up", "Try again");
+  popup.submit();
+  await popup.respond({ type: "STREAM_DELTA", delta: "Partial text" });
+  await popup.respond({ type: "STREAM_ERROR", error: "Rate limited" });
+  await popup.waitForIdle();
+  assert.deepEqual(local.popupDraft.conversation, original);
+  assert.equal(popup.element("popup-follow-up").value, "Try again");
+  assert.equal(popup.element("popup-error").textContent, "Rate limited");
+});

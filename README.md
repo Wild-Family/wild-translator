@@ -57,6 +57,11 @@ The workflow builds `extension-dist/`, uploads `release/wild-punch-vX.Y.Z.zip` w
 - Click the extension icon to open the popup UI
 - Set API keys in **Settings** (options page)
 - Choose a prompt preset and run
+- After a response appears, use **Ask a follow-up** to continue the conversation.
+  Click **Send** or press `Ctrl+Enter` / `Cmd+Enter` in the follow-up field.
+  Follow-ups include the conversation history and use its original prompt preset.
+- The conversation and unsent follow-up are restored when you reopen the popup.
+  Click **Run** to start a new conversation with the current input and preset.
 - Select text on a page and choose **Translate with わいるどぱんち** from the right-click menu to open the popup and run automatically (when selected-text prefill is enabled).
 
 ## Custom base URL
