@@ -5,6 +5,7 @@ import {
   requireApiKey,
 } from "./providers.js";
 import { storage } from "./storage.js";
+import { saveTranslationHistory } from "./history.js";
 
 type GenerateMessage = GenerateRequest & { type: "GENERATE" };
 
@@ -55,6 +56,7 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
         });
         const cached = await cacheGet(cacheKey);
         if (cached) {
+          await saveTranslationHistory(msg, prompt, cached.text);
           sendResponse({
             ok: true,
             text: cached.text,
@@ -73,6 +75,7 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
         });
 
         await cacheSet(cacheKey, result.text);
+        await saveTranslationHistory(msg, prompt, result.text);
         sendResponse({
           ok: true,
           text: result.text,
@@ -172,6 +175,8 @@ chrome.runtime.onConnect.addListener((port) => {
           ) {
             return;
           }
+          if (abortController.signal.aborted) return;
+          await saveTranslationHistory(msg, prompt, cached.text);
           postPortMessage({ type: "STREAM_END" });
           return;
         }
@@ -200,6 +205,8 @@ chrome.runtime.onConnect.addListener((port) => {
         }
         if (abortController.signal.aborted) return;
         await cacheSet(cacheKey, acc);
+        if (abortController.signal.aborted) return;
+        await saveTranslationHistory(msg, prompt, acc);
         postPortMessage({ type: "STREAM_END" });
       } catch (e: any) {
         if (abortController.signal.aborted) return;

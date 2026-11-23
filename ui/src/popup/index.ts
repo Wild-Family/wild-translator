@@ -2,6 +2,12 @@ import { renderMarkdown } from "../app/markdown.js";
 import { restoreConversation } from "../app/conversation.js";
 import type { Conversation } from "../app/conversation.js";
 import { buildConversationMessages } from "../../../shared/src/conversation.js";
+import {
+  HISTORY_LIMIT,
+  HISTORY_STORAGE_KEY,
+  restoreTranslationHistory,
+} from "../../../shared/src/history.js";
+import type { TranslationHistoryEntry } from "../../../shared/src/types.js";
 import type { PromptTemplate } from "../app/models.js";
 import { getAll, setAll } from "../app/storage.js";
 
@@ -25,6 +31,12 @@ const followUpInput = requireElement<HTMLTextAreaElement>("popup-follow-up");
 const followUpButton = requireElement<HTMLButtonElement>("popup-send");
 const settingsButton = requireElement<HTMLButtonElement>("popup-settings");
 const themeButton = requireElement<HTMLButtonElement>("popup-theme");
+const historyButton = requireElement<HTMLButtonElement>("popup-history-button");
+const historyPanel = requireElement<HTMLElement>("popup-history");
+const historyBackButton = requireElement<HTMLButtonElement>("popup-history-back");
+const historyCount = requireElement<HTMLSpanElement>("popup-history-count");
+const historyList = requireElement<HTMLUListElement>("popup-history-list");
+const historyEmpty = requireElement<HTMLParagraphElement>("popup-history-empty");
 
 let prompts: PromptTemplate[] = [];
 let defaultPromptId: string | undefined;
@@ -231,7 +243,87 @@ function updateBusy(nextBusy: boolean): void {
   output.setAttribute("aria-busy", String(nextBusy));
   input.readOnly = nextBusy;
   promptSelect.disabled = nextBusy || prompts.length === 0;
+  historyButton.disabled = nextBusy;
   updateFollowUp();
+}
+
+function closeHistory(): void {
+  historyPanel.hidden = true;
+  main.classList.remove("is-hidden");
+  historyButton.setAttribute("aria-expanded", "false");
+  historyButton.focus();
+}
+
+function openHistoryEntry(entry: TranslationHistoryEntry): void {
+  if (busy) return;
+  conversation = restoreConversation(entry);
+  inputText = entry.inputText;
+  input.value = inputText;
+  defaultPromptId = resolvePromptId(entry.prompt.id);
+  followUpText = "";
+  followUpInput.value = "";
+  outputAutoScroll = false;
+  setError(null);
+  renderPromptOptions();
+  updateOutput();
+  output.scrollTop = 0;
+  closeHistory();
+  input.focus();
+  void saveDraftNow();
+}
+
+async function showHistory(): Promise<void> {
+  if (busy) return;
+  setError(null);
+  main.classList.toggle("is-hidden", true);
+  historyPanel.hidden = false;
+  historyButton.setAttribute("aria-expanded", "true");
+  historyList.replaceChildren();
+  historyCount.textContent = "";
+  historyEmpty.textContent = "Loading history…";
+  historyEmpty.hidden = false;
+  historyBackButton.focus();
+
+  try {
+    const raw = await chrome.storage.local.get([HISTORY_STORAGE_KEY]);
+    const entries = restoreTranslationHistory(raw?.[HISTORY_STORAGE_KEY]);
+    historyCount.textContent = `${entries.length} / ${HISTORY_LIMIT}`;
+    historyEmpty.textContent = "No translations yet. Run a translation to save it here.";
+    historyEmpty.hidden = entries.length > 0;
+    const fragment = document.createDocumentFragment();
+    for (const entry of entries) {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn-secondary popup-history-entry";
+      const meta = document.createElement("span");
+      meta.className = "popup-history-meta";
+      const promptName = document.createElement("span");
+      promptName.textContent = entry.prompt.name;
+      const time = document.createElement("time");
+      const date = new Date(entry.updatedAt);
+      time.dateTime = date.toISOString();
+      time.textContent = date.toLocaleString(undefined, {
+        year: "numeric", month: "short", day: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      });
+      meta.append(promptName, time);
+      const source = document.createElement("span");
+      source.className = "popup-history-source";
+      source.textContent = entry.inputText;
+      const result = document.createElement("span");
+      result.className = "popup-history-result";
+      result.textContent = entry.messages[1].content;
+      button.append(meta, source, result);
+      button.addEventListener("click", () => openHistoryEntry(entry));
+      item.append(button);
+      fragment.append(item);
+    }
+    historyList.replaceChildren(fragment);
+  } catch (error) {
+    historyEmpty.textContent = "Reopen History to try again.";
+    setError(`Could not load translation history. ${formatError(error)}`);
+  }
 }
 
 function applyTheme(nextTheme: "light" | "dark"): void {
@@ -349,13 +441,16 @@ async function run(question?: string): Promise<void> {
   const token = ++runSeq;
 
   setError(null);
-  conversation = {
+  const nextConversation = {
+    id: (isFollowUp && conversation?.id) || crypto.randomUUID(),
+    inputText: isFollowUp ? conversation?.inputText ?? inputText : requestInput,
     prompt: { ...prompt },
     messages: [
       ...buildConversationMessages(prompt.template, requestInput, history),
-      { role: "assistant", content: "" },
+      { role: "assistant" as const, content: "" },
     ],
   };
+  conversation = nextConversation;
   followUpText = "";
   followUpInput.value = "";
   updateBusy(true);
@@ -431,6 +526,8 @@ async function run(question?: string): Promise<void> {
         promptId: prompt.id,
         prompt,
         history,
+        conversationId: nextConversation.id,
+        originalInputText: nextConversation.inputText,
       });
     });
   } catch (error) {
@@ -477,6 +574,7 @@ function isRunShortcut(event: KeyboardEvent): boolean {
 }
 
 function handleRunShortcut(event: KeyboardEvent): void {
+  if (!historyPanel.hidden) return;
   if (event.repeat || event.isComposing || event.keyCode === 229) return;
   if (event.metaKey || event.ctrlKey) {
     runShortcutModifierDown = true;
@@ -538,6 +636,11 @@ output.addEventListener("touchstart", disableOutputAutoScroll, {
 });
 
 window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !historyPanel.hidden) {
+    event.preventDefault();
+    closeHistory();
+    return;
+  }
   if (event.key === "Escape" && busy) {
     event.preventDefault();
     void stop();
@@ -576,6 +679,12 @@ settingsButton.addEventListener("click", () => {
   openSettingsPage();
 });
 
+historyButton.addEventListener("click", () => {
+  if (!historyPanel.hidden) closeHistory();
+  else void showHistory();
+});
+historyBackButton.addEventListener("click", closeHistory);
+
 themeButton.addEventListener("click", async () => {
   themeTouched = true;
   const nextTheme = theme === "dark" ? "light" : "dark";
@@ -588,6 +697,7 @@ themeButton.addEventListener("click", async () => {
 });
 
 async function initialize(): Promise<void> {
+  historyPanel.hidden = true;
   try {
     const state = await getAll();
     prompts = state.prompts;
@@ -654,6 +764,9 @@ async function initialize(): Promise<void> {
           }
         }
         followUpInput.value = followUpText;
+        if (conversation && conversation.inputText === undefined) {
+          conversation.inputText = typeof saved?.input === "string" ? saved.input : inputText;
+        }
       }
     } catch {
       // ignore
@@ -667,6 +780,7 @@ async function initialize(): Promise<void> {
     }
     loading.hidden = true;
     main.classList.remove("is-hidden");
+    historyButton.disabled = false;
 
     window.requestAnimationFrame(() => {
       input.focus();

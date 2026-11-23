@@ -40,8 +40,10 @@ test("generation caches distinguish conversation history and retain the original
   t.after(() => { globalThis.chrome = originalChrome; });
   const requests = [];
   let emptyResponse = false;
+  let failResponse = false;
   t.mock.method(globalThis, "fetch", async (_url, init) => {
     requests.push(JSON.parse(init.body));
+    if (failResponse) throw new Error("Provider unavailable");
     const text = emptyResponse ? "" : `reply-${requests.length}`;
     return new Response(init.body.includes('"stream":true')
       ? `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\ndata: [DONE]\n\n`
@@ -49,12 +51,13 @@ test("generation caches distinguish conversation history and retain the original
   });
   await import("../../build/extension/src/background.js");
 
-  const generate = (history) => new Promise((resolve) => {
+  const generate = (history, overrides = {}) => new Promise((resolve) => {
     listeners.message({
       type: "GENERATE", inputText: "Why?", prompt: originalPrompt, history,
+      ...overrides,
     }, { id: "test-extension" }, resolve);
   });
-  const stream = (history) => new Promise((resolve, reject) => {
+  const stream = (history, overrides = {}) => new Promise((resolve, reject) => {
     let onMessage;
     let text = "";
     listeners.connect({
@@ -70,6 +73,7 @@ test("generation caches distinguish conversation history and retain the original
     });
     onMessage({
       type: "GENERATE_STREAM", inputText: "Why?", prompt: originalPrompt, history,
+      ...overrides,
     });
   });
   const first = [
@@ -81,11 +85,21 @@ test("generation caches distinguish conversation history and retain the original
     { role: "assistant", content: "さようなら" },
   ];
   assert.deepEqual(await generate(first), { ok: true, text: "reply-1" });
+  assert.equal(local.translationHistory.length, 1);
   assert.deepEqual(await generate(first), { ok: true, text: "reply-1" });
+  assert.equal(local.translationHistory.length, 2);
   assert.equal(await stream(first), "reply-1");
+  assert.equal(local.translationHistory.length, 3);
   assert.equal(requests.length, 1);
   assert.equal(await stream(second), "reply-2");
+  assert.equal(local.translationHistory.length, 4);
   assert.equal(await stream(second), "reply-2");
+  assert.equal(local.translationHistory.length, 5);
+  assert.deepEqual(local.translationHistory[0].prompt, originalPrompt);
+  assert.deepEqual(local.translationHistory[0].messages, [
+    ...second, { role: "user", content: "Why?" },
+    { role: "assistant", content: "reply-2" },
+  ]);
   assert.equal(requests.length, 2);
   assert.equal(requests[0].model, "original-model");
   assert.equal(requests[1].model, "original-model");
@@ -101,10 +115,67 @@ test("generation caches distinguish conversation history and retain the original
         { role: "assistant", content: "Earlier answer" },
       ];
       const before = requests.length;
+      const historyBefore = structuredClone(local.translationHistory);
       const request = () => streaming ? stream(retryHistory) : generate(retryHistory);
       await request();
       await request();
       assert.equal(requests.length, before + 2);
+      assert.deepEqual(local.translationHistory, historyBefore);
     });
   }
+
+  await t.test("history remains enabled when caching is disabled and follow-ups update the same entry", async () => {
+    emptyResponse = false;
+    local.cacheEnabled = false;
+    const before = local.translationHistory.length;
+    const response = await generate([], {
+      conversationId: "continued", inputText: "Original source",
+      originalInputText: "Original source",
+    });
+    assert.equal(response.ok, true);
+    const entry = structuredClone(local.translationHistory[0]);
+    assert.equal(entry.id, "continued");
+    await stream(entry.messages, {
+      conversationId: entry.id, originalInputText: entry.inputText,
+    });
+    assert.equal(local.translationHistory.length, before + 1);
+    assert.equal(local.translationHistory[0].id, entry.id);
+    assert.equal(local.translationHistory[0].inputText, "Original source");
+    assert.equal(local.translationHistory[0].messages.length, 4);
+  });
+
+  await t.test("provider failures do not overwrite completed history", async () => {
+    failResponse = true;
+    const before = structuredClone(local.translationHistory);
+    assert.deepEqual(await generate([]), { ok: false, error: "Provider unavailable" });
+    await assert.rejects(stream([]), /Provider unavailable/);
+    assert.deepEqual(local.translationHistory, before);
+    failResponse = false;
+  });
+
+  await t.test("disconnecting after a partial stream does not save an entry", async () => {
+    const before = structuredClone(local.translationHistory);
+    const messages = [];
+    let onMessage;
+    let onDisconnect;
+    const disconnected = new Promise((resolve) => {
+      listeners.connect({
+        name: "wild:generate", sender: { id: "test-extension" },
+        onMessage: { addListener(listener) { onMessage = listener; } },
+        onDisconnect: { addListener(listener) { onDisconnect = listener; } },
+        postMessage(message) {
+          messages.push(message);
+          if (message.type === "STREAM_DELTA") {
+            onDisconnect();
+            resolve();
+          }
+        },
+      });
+    });
+    onMessage({ type: "GENERATE_STREAM", inputText: "Interrupted", prompt: originalPrompt });
+    await disconnected;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(messages.some((message) => message.type === "STREAM_END"), false);
+    assert.deepEqual(local.translationHistory, before);
+  });
 });
