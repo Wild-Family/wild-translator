@@ -241,8 +241,8 @@ async function openUiWithText(
 ) {
   const draftText = text ?? "";
   pendingDraftText = draftText;
+  await setDraftText(draftText);
   await openPopupOrTab(options);
-  void setDraftText(draftText);
 }
 
 async function openPopupOrTab(options: { fallbackToTab: boolean }) {
@@ -284,7 +284,7 @@ async function cacheGet(key: string): Promise<CacheEntry | null> {
     const store = await chrome.storage.local.get([CACHE_KEY]);
     const cache = (store?.[CACHE_KEY] ?? {}) as Record<string, CacheEntry>;
     const hit = cache[key];
-    if (!hit) return null;
+    if (!hit || !hit.text.trim()) return null;
     return hit;
   } catch {
     return null;
@@ -292,6 +292,7 @@ async function cacheGet(key: string): Promise<CacheEntry | null> {
 }
 
 async function cacheSet(key: string, text: string): Promise<void> {
+  if (!text.trim()) return;
   try {
     const enabled = await cacheEnabled();
     if (!enabled) return;

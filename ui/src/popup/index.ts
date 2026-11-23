@@ -409,6 +409,10 @@ async function run(question?: string): Promise<void> {
         if (message?.type === "STREAM_END") {
           void waitForStreamFlush().then(async () => {
             if (activeRun?.token !== token) return;
+            if (!currentReply()?.content.trim()) {
+              settle(() => reject(new Error("No response received. Try again.")));
+              return;
+            }
             await saveDraftNow();
             runState.disconnectExpected = true;
             try {
@@ -473,7 +477,7 @@ function isRunShortcut(event: KeyboardEvent): boolean {
 }
 
 function handleRunShortcut(event: KeyboardEvent): void {
-  if (event.isComposing || event.keyCode === 229) return;
+  if (event.repeat || event.isComposing || event.keyCode === 229) return;
   if (event.metaKey || event.ctrlKey) {
     runShortcutModifierDown = true;
   }
@@ -496,7 +500,6 @@ function handleRunShortcut(event: KeyboardEvent): void {
 }
 
 function handleShortcutKeyup(event: KeyboardEvent): void {
-  handleRunShortcut(event);
   if (event.key === "Meta" || event.key === "Control") {
     runShortcutModifierDown = false;
   }
@@ -543,13 +546,10 @@ window.addEventListener("keydown", (event) => {
 
 window.addEventListener("keydown", handleRunShortcut, true);
 window.addEventListener("keyup", handleShortcutKeyup, true);
-window.addEventListener("keypress", handleRunShortcut, true);
 document.addEventListener("keydown", handleRunShortcut, true);
 document.addEventListener("keyup", handleShortcutKeyup, true);
-document.addEventListener("keypress", handleRunShortcut, true);
 input.addEventListener("keydown", handleRunShortcut, true);
 input.addEventListener("keyup", handleShortcutKeyup, true);
-input.addEventListener("keypress", handleRunShortcut, true);
 window.addEventListener("blur", () => {
   runShortcutModifierDown = false;
 });
@@ -593,6 +593,7 @@ async function initialize(): Promise<void> {
     prompts = state.prompts;
     defaultPromptId = resolvePromptId(state.defaultPromptId);
     renderPromptOptions();
+    let hasSelectionDraft = false;
 
     try {
       const store = chrome.storage?.session ?? chrome.storage?.local;
@@ -600,12 +601,9 @@ async function initialize(): Promise<void> {
       const savedDraft = await chrome.storage?.local?.get(["popupDraft"]);
       const saved = savedDraft?.popupDraft;
       const selectionPrefillEnabled = prefs?.selectionPrefillEnabled !== false;
-      let hasSelectionDraft = false;
+      const draft = await readDraftText(store);
 
-      if (!selectionPrefillEnabled) {
-        await store?.remove(["draftText"]);
-      } else {
-        const draft = await readDraftText(store);
+      if (selectionPrefillEnabled) {
         hasSelectionDraft = draft.hasDraft;
         const text = draft.text;
         if (typeof text === "string") {
@@ -619,8 +617,8 @@ async function initialize(): Promise<void> {
             });
           }
         }
-        await clearDraftText(store);
       }
+      await clearDraftText(store);
 
       if (saved?.promptId) {
         defaultPromptId = resolvePromptId(saved.promptId);
@@ -676,6 +674,10 @@ async function initialize(): Promise<void> {
         input.setSelectionRange(0, 0);
       }
     });
+
+    if (hasSelectionDraft) {
+      void run();
+    }
   } catch (error) {
     loading.hidden = true;
     setError(formatError(error));

@@ -39,9 +39,10 @@ test("generation caches distinguish conversation history and retain the original
   };
   t.after(() => { globalThis.chrome = originalChrome; });
   const requests = [];
+  let emptyResponse = false;
   t.mock.method(globalThis, "fetch", async (_url, init) => {
     requests.push(JSON.parse(init.body));
-    const text = `reply-${requests.length}`;
+    const text = emptyResponse ? "" : `reply-${requests.length}`;
     return new Response(init.body.includes('"stream":true')
       ? `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\ndata: [DONE]\n\n`
       : JSON.stringify({ choices: [{ message: { content: text } }] }));
@@ -91,4 +92,19 @@ test("generation caches distinguish conversation history and retain the original
   assert.deepEqual(requests[1].messages, [
     ...second, { role: "user", content: "Why?" },
   ]);
+
+  for (const streaming of [false, true]) {
+    await t.test(`empty ${streaming ? "streaming" : "non-streaming"} responses are retried without using the cache`, async () => {
+      emptyResponse = true;
+      const retryHistory = [
+        { role: "user", content: streaming ? "Streaming retry" : "Retry" },
+        { role: "assistant", content: "Earlier answer" },
+      ];
+      const before = requests.length;
+      const request = () => streaming ? stream(retryHistory) : generate(retryHistory);
+      await request();
+      await request();
+      assert.equal(requests.length, before + 2);
+    });
+  }
 });

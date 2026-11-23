@@ -62,6 +62,7 @@ The workflow builds `extension-dist/`, uploads `release/wild-punch-vX.Y.Z.zip` w
   Follow-ups include the conversation history and use its original prompt preset.
 - The conversation and unsent follow-up are restored when you reopen the popup.
   Click **Run** to start a new conversation with the current input and preset.
+- Select text on a page and choose **Translate with わいるどぱんち** from the right-click menu to open the popup and run automatically (when selected-text prefill is enabled).
 
 ## Custom base URL
 Each provider has an optional **Base URL** field in **Settings → API Keys**. Leave
