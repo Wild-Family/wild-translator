@@ -116,6 +116,11 @@
       .popup-input {
         width: 100%;
         resize: none;
+        flex-shrink: 0;
+      }
+
+      .has-conversation .popup-input {
+        height: 88px;
       }
 
       .popup-actions {
@@ -141,9 +146,58 @@
       }
 
       .popup-output > * + *,
+      .popup-message-assistant > * + *,
       .popup-output blockquote > * + *,
       .popup-output li > * + * {
         margin-top: 0.5em;
+      }
+
+      .popup-message + .popup-message {
+        margin-top: 12px;
+      }
+
+      .popup-message-user {
+        margin-left: 24px;
+        border-left: 3px solid var(--accent);
+        border-radius: 4px;
+        background: var(--surface-muted);
+        padding: 8px 10px;
+        white-space: pre-wrap;
+      }
+
+      .popup-follow-up {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding-top: 6px;
+      }
+
+      .popup-follow-up[hidden] {
+        display: none;
+      }
+
+      .popup-follow-up label {
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .popup-follow-up-controls {
+        display: flex;
+        align-items: stretch;
+        gap: 8px;
+      }
+
+      .popup-follow-up textarea {
+        flex: 1;
+        min-width: 0;
+        resize: none;
+        font-size: 14px;
+        line-height: 1.4;
+      }
+
+      .popup-follow-up button:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
       }
 
       .popup-output h1,
@@ -289,6 +343,7 @@
               id="popup-input"
               class="popup-input"
               placeholder="Input"
+              aria-label="Input"
               rows="7"
             ></textarea>
 
@@ -296,7 +351,26 @@
               <button id="popup-run" type="button">Run</button>
             </div>
 
-            <div id="popup-output" class="popup-output">Output</div>
+            <div
+              id="popup-output"
+              class="popup-output"
+              role="region"
+              aria-label="Conversation"
+              tabindex="0"
+            >Output</div>
+
+            <form id="popup-follow-up-form" class="popup-follow-up" hidden>
+              <label for="popup-follow-up">Ask a follow-up</label>
+              <div class="popup-follow-up-controls">
+                <textarea
+                  id="popup-follow-up"
+                  placeholder="Ask about this response…"
+                  rows="2"
+                  aria-keyshortcuts="Control+Enter Meta+Enter"
+                ></textarea>
+                <button id="popup-send" type="submit" disabled>Send</button>
+              </div>
+            </form>
           </div>
         </section>
 

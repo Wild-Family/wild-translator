@@ -3,7 +3,7 @@ import type {
   GenerateResult,
   ProviderId,
 } from "../../shared/src/types.js";
-import { renderPromptTemplate } from "../../shared/src/prompt.js";
+import { buildConversationMessages } from "../../shared/src/conversation.js";
 import {
   resolveClaudeUrl,
   resolveGeminiUrl,
@@ -45,10 +45,6 @@ export async function* generateStream(
       throw new Error(`Unsupported provider: ${_exhaustive}`);
     }
   }
-}
-
-function buildPrompt(template: string, inputText: string) {
-  return renderPromptTemplate(template, { text: inputText });
 }
 
 // OpenAI reasoning models (o-series, gpt-5 and later) reject any temperature
@@ -113,14 +109,15 @@ async function openaiGenerate({
   baseUrl,
   inputText,
   template,
+  history,
   signal,
 }: GenerateParams): Promise<GenerateResult> {
-  const prompt = buildPrompt(template, inputText);
+  const messages = buildConversationMessages(template, inputText, history);
   const url = resolveOpenAiUrl(baseUrl);
   const resolvedModel = model ?? "gpt-4o-mini";
   const res = await openaiFetch(url, apiKey, signal, resolvedModel, {
     model: resolvedModel,
-    messages: [{ role: "user", content: prompt }],
+    messages,
   });
 
   const data = (await res.json()) as any;
@@ -134,15 +131,16 @@ async function* openaiGenerateStream({
   baseUrl,
   inputText,
   template,
+  history,
   signal,
 }: GenerateParams): AsyncGenerator<string> {
-  const prompt = buildPrompt(template, inputText);
+  const messages = buildConversationMessages(template, inputText, history);
   const url = resolveOpenAiUrl(baseUrl);
   const resolvedModel = model ?? "gpt-4o-mini";
   const res = await openaiFetch(url, apiKey, signal, resolvedModel, {
     model: resolvedModel,
     stream: true,
-    messages: [{ role: "user", content: prompt }],
+    messages,
   });
   if (!res.body) throw new Error("OpenAI stream: missing response body");
 
@@ -159,9 +157,10 @@ async function geminiGenerate({
   baseUrl,
   inputText,
   template,
+  history,
   signal,
 }: GenerateParams): Promise<GenerateResult> {
-  const prompt = buildPrompt(template, inputText);
+  const messages = buildConversationMessages(template, inputText, history);
   const m = model ?? "gemini-1.5-flash";
   const url = resolveGeminiUrl(m, apiKey, { baseUrl });
 
@@ -170,7 +169,10 @@ async function geminiGenerate({
     headers: { "Content-Type": "application/json" },
     signal,
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      contents: messages.map((message) => ({
+        role: message.role === "assistant" ? "model" : "user",
+        parts: [{ text: message.content }],
+      })),
     }),
   });
   if (!res.ok)
@@ -189,9 +191,10 @@ async function* geminiGenerateStream({
   baseUrl,
   inputText,
   template,
+  history,
   signal,
 }: GenerateParams): AsyncGenerator<string> {
-  const prompt = buildPrompt(template, inputText);
+  const messages = buildConversationMessages(template, inputText, history);
   const m = model ?? "gemini-1.5-flash";
   // SSE streaming
   const url = resolveGeminiUrl(m, apiKey, { baseUrl, stream: true });
@@ -201,7 +204,10 @@ async function* geminiGenerateStream({
     headers: { "Content-Type": "application/json" },
     signal,
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      contents: messages.map((message) => ({
+        role: message.role === "assistant" ? "model" : "user",
+        parts: [{ text: message.content }],
+      })),
     }),
   });
   if (!res.ok)
@@ -223,9 +229,10 @@ async function claudeGenerate({
   baseUrl,
   inputText,
   template,
+  history,
   signal,
 }: GenerateParams): Promise<GenerateResult> {
-  const prompt = buildPrompt(template, inputText);
+  const messages = buildConversationMessages(template, inputText, history);
   const url = resolveClaudeUrl(baseUrl);
   const res = await fetch(url, {
     method: "POST",
@@ -238,7 +245,7 @@ async function claudeGenerate({
     body: JSON.stringify({
       model: model ?? "claude-3-5-sonnet-20241022",
       max_tokens: 1024,
-      messages: [{ role: "user", content: prompt }],
+      messages,
     }),
   });
   if (!res.ok)
@@ -254,9 +261,10 @@ async function* claudeGenerateStream({
   baseUrl,
   inputText,
   template,
+  history,
   signal,
 }: GenerateParams): AsyncGenerator<string> {
-  const prompt = buildPrompt(template, inputText);
+  const messages = buildConversationMessages(template, inputText, history);
   const url = resolveClaudeUrl(baseUrl);
   const res = await fetch(url, {
     method: "POST",
@@ -271,7 +279,7 @@ async function* claudeGenerateStream({
       model: model ?? "claude-3-5-sonnet-20241022",
       max_tokens: 1024,
       stream: true,
-      messages: [{ role: "user", content: prompt }],
+      messages,
     }),
   });
   if (!res.ok)

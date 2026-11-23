@@ -57,6 +57,11 @@ The workflow builds `extension-dist/`, uploads `release/wild-punch-vX.Y.Z.zip` w
 - Click the extension icon to open the popup UI
 - Set API keys in **Settings** (options page)
 - Choose a prompt preset and run
+- After a response appears, use **Ask a follow-up** to continue the conversation.
+  Click **Send** or press `Ctrl+Enter` / `Cmd+Enter` in the follow-up field.
+  Follow-ups include the conversation history and use its original prompt preset.
+- The conversation and unsent follow-up are restored when you reopen the popup.
+  Click **Run** to start a new conversation with the current input and preset.
 
 ## Custom base URL
 Each provider has an optional **Base URL** field in **Settings → API Keys**. Leave
