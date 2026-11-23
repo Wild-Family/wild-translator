@@ -57,6 +57,7 @@ The workflow builds `extension-dist/`, uploads `release/wild-punch-vX.Y.Z.zip` w
 - Click the extension icon to open the popup UI
 - Set API keys in **Settings** (options page)
 - Choose a prompt preset and run
+- Select text on a page and choose **Translate with わいるどぱんち** from the right-click menu to open the popup and run automatically (when selected-text prefill is enabled).
 
 ## Custom base URL
 Each provider has an optional **Base URL** field in **Settings → API Keys**. Leave

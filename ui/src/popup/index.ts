@@ -505,6 +505,7 @@ async function initialize(): Promise<void> {
     prompts = state.prompts;
     defaultPromptId = resolvePromptId(state.defaultPromptId);
     renderPromptOptions();
+    let hasSelectionDraft = false;
 
     try {
       const store = chrome.storage?.session ?? chrome.storage?.local;
@@ -512,12 +513,9 @@ async function initialize(): Promise<void> {
       const savedDraft = await chrome.storage?.local?.get(["popupDraft"]);
       const saved = savedDraft?.popupDraft;
       const selectionPrefillEnabled = prefs?.selectionPrefillEnabled !== false;
-      let hasSelectionDraft = false;
+      const draft = await readDraftText(store);
 
-      if (!selectionPrefillEnabled) {
-        await store?.remove(["draftText"]);
-      } else {
-        const draft = await readDraftText(store);
+      if (selectionPrefillEnabled) {
         hasSelectionDraft = draft.hasDraft;
         const text = draft.text;
         if (typeof text === "string") {
@@ -531,8 +529,8 @@ async function initialize(): Promise<void> {
             });
           }
         }
-        await clearDraftText(store);
       }
+      await clearDraftText(store);
 
       if (saved?.output) {
         outputText = saved.output;
@@ -565,6 +563,10 @@ async function initialize(): Promise<void> {
         input.setSelectionRange(0, 0);
       }
     });
+
+    if (hasSelectionDraft) {
+      void run();
+    }
   } catch (error) {
     loading.hidden = true;
     setError(formatError(error));

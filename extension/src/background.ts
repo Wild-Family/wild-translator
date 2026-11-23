@@ -240,8 +240,8 @@ async function openUiWithText(
 ) {
   const draftText = text ?? "";
   pendingDraftText = draftText;
+  await setDraftText(draftText);
   await openPopupOrTab(options);
-  void setDraftText(draftText);
 }
 
 async function openPopupOrTab(options: { fallbackToTab: boolean }) {
