@@ -25,11 +25,27 @@ export type ConversationMessage = {
   content: string;
 };
 
+export type Conversation = {
+  id?: string;
+  inputText?: string;
+  prompt: PromptTemplate;
+  messages: ConversationMessage[];
+};
+
+export type TranslationHistoryEntry = Conversation & {
+  id: string;
+  inputText: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type GenerateRequest = {
   inputText: string;
   promptId?: string;
   prompt?: PromptTemplate;
   history?: ConversationMessage[];
+  conversationId?: string;
+  originalInputText?: string;
 };
 
 export type GenerateParams = {

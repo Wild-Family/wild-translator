@@ -36,17 +36,30 @@ function storageArea(values = {}) {
 class Element extends EventTarget {
   hidden = false;
   value = "";
-  textContent = "";
+  children = [];
+  ownText = "";
   dataset = {};
   classList = { remove() {}, toggle() {} };
 
   append(...children) {
-    this.textContent += children.map((child) => child.textContent).join("");
+    for (const child of children) {
+      if (child.isFragment) this.children.push(...child.children);
+      else this.children.push(child);
+    }
   }
 
   replaceChildren(...children) {
     this.textContent = "";
     this.append(...children);
+  }
+
+  get textContent() {
+    return this.ownText + this.children.map((child) => child.textContent).join("");
+  }
+
+  set textContent(value) {
+    this.ownText = value;
+    this.children = [];
   }
 
   setAttribute() {}
@@ -84,7 +97,7 @@ async function setup(t, {
         return elements.get(id);
       },
       createElement: () => new Element(),
-      createDocumentFragment: () => new Element(),
+      createDocumentFragment: () => Object.assign(new Element(), { isFragment: true }),
       createTextNode: (textContent) => ({ textContent }),
     });
     globalThis.window = Object.assign(new EventTarget(), {
@@ -238,6 +251,8 @@ test("context-menu translation runs automatically after restoring the selected p
     promptId: "custom",
     prompt: { id: "custom", name: "Custom", template: "{{text}}" },
     history: [],
+    conversationId: popup.chrome.storage.local.values.popupDraft.conversation.id,
+    originalInputText: "Selected text",
   }]);
   assert.equal(popup.element("popup-input").value, "Selected text");
   assert.equal(popup.element("popup-output").textContent, "OK");
@@ -326,6 +341,8 @@ function savedConversation() {
       output: "こんにちは",
       promptId: "translate",
       conversation: {
+        id: "saved-conversation",
+        inputText: "hello",
         prompt: {
           id: "translate", name: "Translate", template: "Translate: {{text}}",
           provider: "claude", model: "original-model",
@@ -361,6 +378,8 @@ test("follow-ups keep the original preset and history after input/preset edits a
   assert.deepEqual(popup.requests[0].history, original.messages);
   assert.deepEqual(popup.requests[0].prompt, original.prompt);
   assert.equal(popup.requests[0].inputText, "Why?");
+  assert.equal(popup.requests[0].originalInputText, "hello");
+  assert.equal(popup.requests[0].conversationId, original.id);
   await finish(popup, "First answer");
   popup.type("popup-follow-up", "Unsent question");
   window.dispatchEvent(new Event("pagehide"));
@@ -370,6 +389,7 @@ test("follow-ups keep the original preset and history after input/preset edits a
   popup.submit();
   assert.equal(popup.requests[1].history.length, 4);
   assert.deepEqual(popup.requests[1].prompt, original.prompt);
+  assert.equal(popup.requests[1].conversationId, original.id);
   await finish(popup, "Second answer");
 });
 
@@ -432,4 +452,110 @@ test("a provider error after partial output restores the previous conversation a
   assert.deepEqual(local.popupDraft.conversation, original);
   assert.equal(popup.element("popup-follow-up").value, "Try again");
   assert.equal(popup.element("popup-error").textContent, "Rate limited");
+});
+
+function historyEntry(id, updatedAt) {
+  return {
+    ...savedConversation().popupDraft.conversation,
+    id, createdAt: updatedAt, updatedAt,
+  };
+}
+
+async function click(popup, id) {
+  popup.element(id).dispatchEvent(new Event("click"));
+  await delay(0);
+}
+
+test("History lists the latest 50 translations with original text and response previews", async (t) => {
+  const entries = Array.from({ length: 55 }, (_, index) => ({
+    ...historyEntry(`translation-${index}`, index + 1), inputText: `Source ${index}`,
+  }));
+  const popup = await setup(t, { local: { translationHistory: entries } });
+  await popup.openPopup();
+  await click(popup, "popup-history-button");
+
+  assert.equal(popup.element("popup-history").hidden, false);
+  assert.equal(popup.element("popup-history-count").textContent, "50 / 50");
+  assert.equal(popup.element("popup-history-empty").hidden, true);
+  const items = popup.element("popup-history-list").children;
+  assert.equal(items.length, 50);
+  assert.match(items[0].textContent, /Source 54.*こんにちは/s);
+  assert.match(items.at(-1).textContent, /Source 5.*こんにちは/s);
+  assert.deepEqual(popup.requests, []);
+});
+
+test("reopening an entry restores its complete conversation and continues with its original preset", async (t) => {
+  const entry = historyEntry("old-translation", 1000);
+  entry.prompt.id = "deleted-preset";
+  entry.messages.push(
+    { role: "user", content: "Earlier question" },
+    { role: "assistant", content: "Earlier answer" },
+  );
+  const local = { translationHistory: [entry] };
+  const popup = await setup(t, { local, manualStream: true });
+  await popup.openPopup();
+  await click(popup, "popup-history-button");
+  popup.element("popup-history-list").children[0].children[0].dispatchEvent(new Event("click"));
+
+  assert.equal(popup.element("popup-history").hidden, true);
+  assert.equal(popup.element("popup-input").value, "hello");
+  assert.match(popup.element("popup-output").textContent, /こんにちは.*Earlier question.*Earlier answer/s);
+  assert.equal(popup.element("popup-follow-up-form").hidden, false);
+  assert.deepEqual(popup.requests, []);
+  await popup.openPopup();
+  assert.equal(local.popupDraft.conversation.id, entry.id);
+
+  popup.type("popup-input", "Edited source");
+  popup.type("popup-follow-up", "Continue");
+  popup.submit();
+  assert.equal(popup.requests[0].conversationId, entry.id);
+  assert.equal(popup.requests[0].originalInputText, "hello");
+  assert.deepEqual(popup.requests[0].history, entry.messages);
+  assert.deepEqual(popup.requests[0].prompt, entry.prompt);
+  await finish(popup, "New answer");
+  assert.equal(local.translationHistory[0].messages.length, 4);
+});
+
+test("Back and Escape preserve the current draft and shortcuts do not run from History", async (t) => {
+  const popup = await setup(t, { local: savedConversation() });
+  await popup.openPopup();
+  popup.type("popup-input", "Unsent input");
+  popup.type("popup-follow-up", "Unsent question");
+  await click(popup, "popup-history-button");
+  assert.match(popup.element("popup-history-empty").textContent, /No translations yet/);
+  popup.shortcut("keydown");
+  assert.deepEqual(popup.requests, []);
+  await click(popup, "popup-history-back");
+  assert.equal(popup.element("popup-history").hidden, true);
+  assert.equal(popup.element("popup-input").value, "Unsent input");
+  assert.equal(popup.element("popup-follow-up").value, "Unsent question");
+  await click(popup, "popup-history-button");
+  popup.shortcut("keydown", { key: "Escape", ctrlKey: false });
+  assert.equal(popup.element("popup-history").hidden, true);
+});
+
+test("History is disabled during generation", async (t) => {
+  const popup = await setup(t, { manualStream: true });
+  await popup.openPopup();
+  popup.type("popup-input", "hello");
+  await click(popup, "popup-run");
+  assert.equal(popup.element("popup-history-button").disabled, true);
+  await click(popup, "popup-history-button");
+  assert.equal(popup.element("popup-history").hidden, true);
+  await finish(popup, "こんにちは");
+  assert.equal(popup.element("popup-history-button").disabled, false);
+});
+
+test("legacy drafts keep their original input when a follow-up creates their first history entry", async (t) => {
+  const local = savedConversation();
+  delete local.popupDraft.conversation.id;
+  delete local.popupDraft.conversation.inputText;
+  const popup = await setup(t, { local, manualStream: true });
+  await popup.openPopup();
+  popup.type("popup-input", "Edited input");
+  popup.type("popup-follow-up", "Why?");
+  popup.submit();
+  assert.equal(popup.requests[0].originalInputText, "hello");
+  assert.equal(typeof popup.requests[0].conversationId, "string");
+  await finish(popup, "Answer");
 });
