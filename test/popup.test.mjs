@@ -69,6 +69,7 @@ class Element extends EventTarget {
 
 async function setup(t, {
   local = {}, session = {}, rejectPopup = false, manualStream = false,
+  allowStartupError = false,
 } = {}) {
   const timers = new Set();
   const requests = [];
@@ -115,7 +116,7 @@ async function setup(t, {
       if (elements.get("popup-loading").hidden) {
         await delay(0);
         if (!manualStream) await waitForIdle();
-        assert.equal(elements.get("popup-error").textContent, "");
+        if (!allowStartupError) assert.equal(elements.get("popup-error").textContent, "");
         return;
       }
       await delay(5);
@@ -150,13 +151,13 @@ async function setup(t, {
       onInstalled: chromeEvent(),
       getURL: (path) => `chrome-extension://test-extension/${path}`,
       async sendMessage(message) {
-        let response;
-        await chrome.runtime.onMessage.emit(
-          message,
-          { id: chrome.runtime.id },
-          (value) => { response = value; },
-        );
-        return response;
+        return new Promise((resolve, reject) => {
+          void chrome.runtime.onMessage.emit(
+            message, { id: chrome.runtime.id }, resolve,
+          ).then((results) => {
+            if (!results.includes(true)) resolve(undefined);
+          }, reject);
+        });
       },
       connect({ name }) {
         assert.equal(name, "wild:generate");
@@ -282,7 +283,7 @@ test("reopening the popup does not run the consumed selection again", async (t) 
 });
 
 test("a draft recovered from storage after a worker restart also runs once", async (t) => {
-  const popup = await setup(t, { session: { draftText: "Recovered selection" } });
+  const popup = await setup(t, { session: { draftText: "Recovered selection" }, allowStartupError: true });
   popup.chrome.runtime.sendMessage = async () => {
     throw new Error("Worker unavailable");
   };
@@ -466,6 +467,76 @@ async function click(popup, id) {
   await delay(0);
 }
 
+test("History recovers the existing saved translation without another API call", async (t) => {
+  const local = savedConversation();
+  const popup = await setup(t, { local });
+  await popup.openPopup();
+  await click(popup, "popup-history-button");
+
+  assert.equal(popup.element("popup-history-count").textContent, "1 / 50");
+  assert.match(popup.element("popup-history-list").textContent, /hello.*こんにちは/s);
+  assert.equal(local.translationHistory[0].id, local.popupDraft.conversation.id);
+  assert.deepEqual(popup.requests, []);
+});
+
+test("recovering an older response precedes replacing its draft with a new selection", async (t) => {
+  const local = { popupDraft: {
+    input: "Previous source", output: "Previous response", promptId: "translate",
+  } };
+  const popup = await setup(t, { local });
+  await popup.rightClick("New selection");
+  await click(popup, "popup-history-button");
+  assert.equal(popup.element("popup-history-count").textContent, "2 / 50");
+  assert.match(popup.element("popup-history-list").textContent, /Previous source.*Previous response/s);
+  await popup.openPopup();
+  assert.equal(local.translationHistory.length, 2);
+  assert.deepEqual(popup.requests.map((request) => request.inputText), ["New selection"]);
+});
+
+test("stopped partial responses stay out of History after reopening", async (t) => {
+  const local = {};
+  const popup = await setup(t, { local, manualStream: true });
+  await popup.openPopup();
+  popup.type("popup-input", "hello");
+  await click(popup, "popup-run");
+  await popup.respond({ type: "STREAM_DELTA", delta: "Partial response" });
+  await click(popup, "popup-run");
+  assert.equal(local.popupDraft.completed, false);
+  await popup.openPopup();
+  await click(popup, "popup-history-button");
+  assert.equal(popup.element("popup-history-count").textContent, "0 / 50");
+});
+
+test("history save warnings preserve the completed response and allow later recovery", async (t) => {
+  const local = {};
+  const popup = await setup(t, { local, manualStream: true });
+  await popup.openPopup();
+  popup.type("popup-input", "hello");
+  await click(popup, "popup-run");
+  await popup.respond({ type: "STREAM_DELTA", delta: "こんにちは" });
+  await popup.respond({ type: "STREAM_END", historyError: "History storage is full" });
+  await popup.waitForIdle();
+  assert.equal(popup.element("popup-output").textContent, "こんにちは");
+  assert.equal(popup.element("popup-error").textContent, "History storage is full");
+  assert.equal(local.popupDraft.completed, true);
+  await click(popup, "popup-history-button");
+  assert.equal(popup.element("popup-history-count").textContent, "1 / 50");
+});
+
+test("history loading failures are visible while the translator remains usable", async (t) => {
+  const popup = await setup(t, { allowStartupError: true });
+  const get = popup.chrome.storage.local.get;
+  popup.chrome.storage.local.get = async (keys) => {
+    if (keys.includes("translationHistory")) throw new Error("Storage unavailable");
+    return get(keys);
+  };
+  await popup.openPopup();
+  assert.match(popup.element("popup-error").textContent, /Could not load translation history.*Storage unavailable/);
+  await click(popup, "popup-history-button");
+  assert.match(popup.element("popup-error").textContent, /Storage unavailable/);
+  assert.equal(popup.element("popup-history-count").textContent, "");
+});
+
 test("History lists the latest 50 translations with original text and response previews", async (t) => {
   const entries = Array.from({ length: 55 }, (_, index) => ({
     ...historyEntry(`translation-${index}`, index + 1), inputText: `Source ${index}`,
@@ -522,7 +593,7 @@ test("Back and Escape preserve the current draft and shortcuts do not run from H
   popup.type("popup-input", "Unsent input");
   popup.type("popup-follow-up", "Unsent question");
   await click(popup, "popup-history-button");
-  assert.match(popup.element("popup-history-empty").textContent, /No translations yet/);
+  assert.equal(popup.element("popup-history-count").textContent, "1 / 50");
   popup.shortcut("keydown");
   assert.deepEqual(popup.requests, []);
   await click(popup, "popup-history-back");

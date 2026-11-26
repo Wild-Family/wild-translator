@@ -4,7 +4,6 @@ import type { Conversation } from "../app/conversation.js";
 import { buildConversationMessages } from "../../../shared/src/conversation.js";
 import {
   HISTORY_LIMIT,
-  HISTORY_STORAGE_KEY,
   restoreTranslationHistory,
 } from "../../../shared/src/history.js";
 import type { TranslationHistoryEntry } from "../../../shared/src/types.js";
@@ -42,6 +41,7 @@ let prompts: PromptTemplate[] = [];
 let defaultPromptId: string | undefined;
 let inputText = "";
 let conversation: Conversation | null = null;
+let conversationCompleted = false;
 let followUpText = "";
 let busy = false;
 let saveTimer: number | null = null;
@@ -63,6 +63,7 @@ type ActiveRun = {
   port: chrome.runtime.Port;
   disconnectExpected: boolean;
   previousConversation: Conversation | null;
+  previousConversationCompleted: boolean;
   previousFollowUp: string;
 };
 
@@ -113,6 +114,8 @@ function getDraftSnapshot() {
       output: currentReply()?.content ?? "",
       promptId: resolvePromptId(defaultPromptId),
       conversation,
+      completed: conversationCompleted,
+      updatedAt: Date.now(),
       followUp: followUpText,
     },
   };
@@ -257,6 +260,7 @@ function closeHistory(): void {
 function openHistoryEntry(entry: TranslationHistoryEntry): void {
   if (busy) return;
   conversation = restoreConversation(entry);
+  conversationCompleted = true;
   inputText = entry.inputText;
   input.value = inputText;
   defaultPromptId = resolvePromptId(entry.prompt.id);
@@ -285,8 +289,7 @@ async function showHistory(): Promise<void> {
   historyBackButton.focus();
 
   try {
-    const raw = await chrome.storage.local.get([HISTORY_STORAGE_KEY]);
-    const entries = restoreTranslationHistory(raw?.[HISTORY_STORAGE_KEY]);
+    const entries = await loadHistory();
     historyCount.textContent = `${entries.length} / ${HISTORY_LIMIT}`;
     historyEmpty.textContent = "No translations yet. Run a translation to save it here.";
     historyEmpty.hidden = entries.length > 0;
@@ -324,6 +327,14 @@ async function showHistory(): Promise<void> {
     historyEmpty.textContent = "Reopen History to try again.";
     setError(`Could not load translation history. ${formatError(error)}`);
   }
+}
+
+async function loadHistory(): Promise<TranslationHistoryEntry[]> {
+  const response = await chrome.runtime.sendMessage({ type: "LOAD_TRANSLATION_HISTORY" });
+  if (!response?.ok) {
+    throw new Error(response?.error ?? "Close and reopen the extension to load history.");
+  }
+  return restoreTranslationHistory(response.entries);
 }
 
 function applyTheme(nextTheme: "light" | "dark"): void {
@@ -410,6 +421,7 @@ async function stop(): Promise<void> {
   clearStreamQueue();
   if (!reply?.content.trim()) {
     conversation = currentRun.previousConversation;
+    conversationCompleted = currentRun.previousConversationCompleted;
     followUpText = currentRun.previousFollowUp;
     followUpInput.value = followUpText;
   }
@@ -435,6 +447,7 @@ async function run(question?: string): Promise<void> {
     : prompts.find((item) => item.id === resolvePromptId(defaultPromptId));
   if (!requestInput.trim() || !prompt) return;
   const previousConversation = structuredClone(conversation);
+  const previousConversationCompleted = conversationCompleted;
   const previousFollowUp = followUpText;
   const history = isFollowUp ? conversation?.messages ?? [] : [];
 
@@ -451,6 +464,7 @@ async function run(question?: string): Promise<void> {
     ],
   };
   conversation = nextConversation;
+  conversationCompleted = false;
   followUpText = "";
   followUpInput.value = "";
   updateBusy(true);
@@ -466,6 +480,7 @@ async function run(question?: string): Promise<void> {
       port: nextPort,
       disconnectExpected: false,
       previousConversation,
+      previousConversationCompleted,
       previousFollowUp,
     };
     activeRun = runState;
@@ -508,6 +523,8 @@ async function run(question?: string): Promise<void> {
               settle(() => reject(new Error("No response received. Try again.")));
               return;
             }
+            conversationCompleted = true;
+            if (message.historyError) setError(String(message.historyError));
             await saveDraftNow();
             runState.disconnectExpected = true;
             try {
@@ -534,6 +551,7 @@ async function run(question?: string): Promise<void> {
     if (runSeq === token && busy) {
       clearStreamQueue();
       conversation = previousConversation;
+      conversationCompleted = previousConversationCompleted;
       followUpText = previousFollowUp;
       followUpInput.value = followUpText;
       setError(formatError(error));
@@ -706,6 +724,13 @@ async function initialize(): Promise<void> {
     let hasSelectionDraft = false;
 
     try {
+      // Recover the previous response before a selection or new run replaces its draft.
+      await loadHistory();
+    } catch (error) {
+      setError(`Could not load translation history. ${formatError(error)}`);
+    }
+
+    try {
       const store = chrome.storage?.session ?? chrome.storage?.local;
       const prefs = await chrome.storage?.local?.get(["selectionPrefillEnabled"]);
       const savedDraft = await chrome.storage?.local?.get(["popupDraft"]);
@@ -741,6 +766,7 @@ async function initialize(): Promise<void> {
       }
       if (!hasSelectionDraft) {
         conversation = restoreConversation(saved?.conversation);
+        conversationCompleted = saved?.completed !== false;
         // Keep output saved before conversation support was introduced.
         if (!conversation && typeof saved?.output === "string" && saved.output) {
           const prompt = prompts.find((item) => item.id === defaultPromptId);
@@ -759,8 +785,10 @@ async function initialize(): Promise<void> {
           if (conversation.messages.length > 2) {
             followUpText ||= conversation.messages.at(-2)?.content ?? "";
             conversation.messages.splice(-2);
+            conversationCompleted = true;
           } else {
             conversation = null;
+            conversationCompleted = false;
           }
         }
         followUpInput.value = followUpText;

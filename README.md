@@ -67,6 +67,10 @@ The workflow builds `extension-dist/`, uploads `release/wild-punch-vX.Y.Z.zip` w
   reopen it and continue its conversation without generating the translation again.
   Follow-ups update the same entry. History is stored locally in your browser;
   failed, empty, and interrupted responses are not added.
+  The last response already saved by an older version is recovered into History
+  when the popup opens, including drafts saved before follow-up chat was added.
+  If local storage cannot save or load history, the popup shows an error while
+  keeping the translation available.
 - Select text on a page and choose **Translate with わいるどぱんち** from the right-click menu to open the popup and run automatically (when selected-text prefill is enabled).
 
 ## Custom base URL

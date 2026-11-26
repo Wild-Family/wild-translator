@@ -57,6 +57,7 @@ test("generation caches distinguish conversation history and retain the original
       ...overrides,
     }, { id: "test-extension" }, resolve);
   });
+  let lastStreamEnd;
   const stream = (history, overrides = {}) => new Promise((resolve, reject) => {
     let onMessage;
     let text = "";
@@ -67,7 +68,10 @@ test("generation caches distinguish conversation history and retain the original
       onDisconnect: { addListener() {} },
       postMessage(message) {
         if (message.type === "STREAM_DELTA") text += message.delta;
-        if (message.type === "STREAM_END") resolve(text);
+        if (message.type === "STREAM_END") {
+          lastStreamEnd = message;
+          resolve(text);
+        }
         if (message.type === "STREAM_ERROR") reject(new Error(message.error));
       },
     });
@@ -151,6 +155,43 @@ test("generation caches distinguish conversation history and retain the original
     await assert.rejects(stream([]), /Provider unavailable/);
     assert.deepEqual(local.translationHistory, before);
     failResponse = false;
+  });
+
+  await t.test("history storage failures report a warning while fresh and cached translations succeed", async () => {
+    local.cacheEnabled = true;
+    const before = structuredClone(local.translationHistory);
+    const set = chrome.storage.local.set;
+    chrome.storage.local.set = async (items) => {
+      if ("translationHistory" in items) throw new Error("Storage full");
+      await set(items);
+    };
+    try {
+      for (const streaming of [false, true]) {
+        const overrides = { inputText: `Storage failure ${streaming}` };
+        let firstResponse;
+        for (const cached of [false, true]) {
+          const beforeRequests = requests.length;
+          if (streaming) {
+            const text = await stream([], overrides);
+            assert.match(text, /^reply-/);
+            assert.match(lastStreamEnd.historyError, /history could not be saved.*Storage full/);
+            firstResponse ??= text;
+            assert.equal(text, firstResponse);
+          } else {
+            const response = await generate([], overrides);
+            assert.equal(response.ok, true);
+            assert.match(response.text, /^reply-/);
+            assert.match(response.historyError, /history could not be saved.*Storage full/);
+            firstResponse ??= response.text;
+            assert.equal(response.text, firstResponse);
+          }
+          assert.equal(requests.length, beforeRequests + (cached ? 0 : 1));
+          assert.deepEqual(local.translationHistory, before);
+        }
+      }
+    } finally {
+      chrome.storage.local.set = set;
+    }
   });
 
   await t.test("disconnecting after a partial stream does not save an entry", async () => {
