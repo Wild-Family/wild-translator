@@ -1,4 +1,7 @@
-import { buildConversationMessages } from "../../shared/src/conversation.js";
+import {
+  buildConversationMessages,
+  restoreConversation,
+} from "../../shared/src/conversation.js";
 import {
   HISTORY_LIMIT,
   HISTORY_STORAGE_KEY,
@@ -11,6 +14,73 @@ import type {
 } from "../../shared/src/types.js";
 
 let pendingSave = Promise.resolve();
+
+function serialize<T>(operation: () => Promise<T>): Promise<T> {
+  const result = pendingSave.then(operation);
+  // Recover the queue while leaving the caller able to report this failure.
+  pendingSave = result.then(() => {}, () => {});
+  return result;
+}
+
+export function loadTranslationHistory(
+  prompts: PromptTemplate[],
+  defaultPromptId?: string,
+): Promise<TranslationHistoryEntry[]> {
+  return serialize(async () => {
+    const raw = await chrome.storage.local.get([HISTORY_STORAGE_KEY, "popupDraft"]);
+    const entries = restoreTranslationHistory(raw?.[HISTORY_STORAGE_KEY]);
+    const draft = raw?.popupDraft;
+    if (!draft || typeof draft !== "object" || draft.completed === false) return entries;
+
+    let conversation = restoreConversation(draft.conversation);
+    // Drafts saved before chat support contain only the input and response.
+    if (
+      !conversation && !draft.conversation && typeof draft.input === "string" &&
+      typeof draft.output === "string" && draft.output.trim()
+    ) {
+      const promptId = draft.promptId ?? defaultPromptId ?? prompts[0]?.id;
+      const prompt = prompts.find((item) => item.id === promptId);
+      if (prompt) {
+        conversation = {
+          prompt: { ...prompt },
+          messages: [
+            ...buildConversationMessages(prompt.template, draft.input),
+            { role: "assistant", content: draft.output },
+          ],
+        };
+      }
+    }
+    if (!conversation?.messages.at(-1)?.content.trim()) return entries;
+    const inputText = conversation.inputText ?? draft.input;
+    if (typeof inputText !== "string") return entries;
+    // Never replace a newer archived conversation with an old popup snapshot.
+    if (entries.some((entry) => entry.id === conversation.id)) return entries;
+
+    const now = Date.now();
+    const updatedAt = typeof draft.updatedAt === "number" &&
+      Number.isFinite(draft.updatedAt) && Math.abs(draft.updatedAt) <= 8.64e15
+      ? draft.updatedAt : now;
+    const entry: TranslationHistoryEntry = {
+      ...conversation,
+      id: conversation.id || crypto.randomUUID(),
+      inputText,
+      createdAt: updatedAt,
+      updatedAt,
+    };
+    const recovered = restoreTranslationHistory([entry, ...entries]);
+    // Store the assigned ID atomically so reopening never duplicates a legacy draft.
+    await chrome.storage.local.set({
+      [HISTORY_STORAGE_KEY]: recovered,
+      popupDraft: {
+        ...draft,
+        conversation: { ...conversation, id: entry.id, inputText },
+        completed: true,
+        updatedAt,
+      },
+    });
+    return recovered;
+  });
+}
 
 export function saveTranslationHistory(
   request: GenerateRequest,
@@ -32,7 +102,7 @@ export function saveTranslationHistory(
   };
 
   // Serialize writes across popups and tabs so concurrent completions are retained.
-  pendingSave = pendingSave.then(async () => {
+  return serialize(async () => {
     const raw = await chrome.storage.local.get([HISTORY_STORAGE_KEY]);
     const entries = restoreTranslationHistory(raw?.[HISTORY_STORAGE_KEY]);
     const previous = entries.find((item) => item.id === entry.id);
@@ -46,8 +116,5 @@ export function saveTranslationHistory(
         ...entries.filter((item) => item.id !== entry.id),
       ].slice(0, HISTORY_LIMIT),
     });
-  }).catch(() => {
-    // A storage failure must not discard a successful translation.
   });
-  return pendingSave;
 }

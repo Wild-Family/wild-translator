@@ -1,11 +1,11 @@
-import type { GenerateRequest } from "../../shared/src/types.js";
+import type { GenerateRequest, PromptTemplate } from "../../shared/src/types.js";
 import {
   generate,
   generateStream,
   requireApiKey,
 } from "./providers.js";
 import { storage } from "./storage.js";
-import { saveTranslationHistory } from "./history.js";
+import { loadTranslationHistory, saveTranslationHistory } from "./history.js";
 
 type GenerateMessage = GenerateRequest & { type: "GENERATE" };
 
@@ -16,7 +16,7 @@ type OpenUiWithTextMessage = {
 };
 
 type GenerateResponse =
-  | { ok: true; text: string }
+  | { ok: true; text: string; historyError?: string }
   | { ok: false; error: string };
 
 type CacheEntry = {
@@ -28,9 +28,36 @@ const CACHE_KEY = "wildCache";
 const CACHE_MAX = 50;
 let pendingDraftText: string | undefined;
 
+async function persistHistory(
+  request: GenerateRequest,
+  prompt: PromptTemplate,
+  text: string,
+): Promise<{ historyError?: string }> {
+  try {
+    await saveTranslationHistory(request, prompt, text);
+    return {};
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { historyError: `Translation finished, but its history could not be saved. ${detail}` };
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return;
   if (!msg?.type) return;
+
+  if (msg.type === "LOAD_TRANSLATION_HISTORY") {
+    (async () => {
+      try {
+        const state = await storage.getAll();
+        const entries = await loadTranslationHistory(state.prompts, state.defaultPromptId);
+        sendResponse({ ok: true, entries });
+      } catch (error) {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+    })();
+    return true;
+  }
 
   if (msg.type === "GENERATE") {
     (async () => {
@@ -56,10 +83,11 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
         });
         const cached = await cacheGet(cacheKey);
         if (cached) {
-          await saveTranslationHistory(msg, prompt, cached.text);
+          const historyStatus = await persistHistory(msg, prompt, cached.text);
           sendResponse({
             ok: true,
             text: cached.text,
+            ...historyStatus,
           } satisfies GenerateResponse);
           return;
         }
@@ -75,10 +103,11 @@ chrome.runtime.onMessage.addListener((msg: any, sender, sendResponse) => {
         });
 
         await cacheSet(cacheKey, result.text);
-        await saveTranslationHistory(msg, prompt, result.text);
+        const historyStatus = await persistHistory(msg, prompt, result.text);
         sendResponse({
           ok: true,
           text: result.text,
+          ...historyStatus,
         } satisfies GenerateResponse);
       } catch (e: any) {
         sendResponse({
@@ -176,8 +205,8 @@ chrome.runtime.onConnect.addListener((port) => {
             return;
           }
           if (abortController.signal.aborted) return;
-          await saveTranslationHistory(msg, prompt, cached.text);
-          postPortMessage({ type: "STREAM_END" });
+          const historyStatus = await persistHistory(msg, prompt, cached.text);
+          postPortMessage({ type: "STREAM_END", ...historyStatus });
           return;
         }
 
@@ -206,8 +235,8 @@ chrome.runtime.onConnect.addListener((port) => {
         if (abortController.signal.aborted) return;
         await cacheSet(cacheKey, acc);
         if (abortController.signal.aborted) return;
-        await saveTranslationHistory(msg, prompt, acc);
-        postPortMessage({ type: "STREAM_END" });
+        const historyStatus = await persistHistory(msg, prompt, acc);
+        postPortMessage({ type: "STREAM_END", ...historyStatus });
       } catch (e: any) {
         if (abortController.signal.aborted) return;
         postPortMessage({
