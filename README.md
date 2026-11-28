@@ -71,6 +71,9 @@ The workflow builds `extension-dist/`, uploads `release/wild-punch-vX.Y.Z.zip` w
   when the popup opens, including drafts saved before follow-up chat was added.
   If local storage cannot save or load history, the popup shows an error while
   keeping the translation available.
+  The popup reads history directly from local storage and saves completed replies
+  even if an older background worker is still running after a rebuild. Repeated
+  saves do not duplicate entries or replace later follow-ups.
 - Select text on a page and choose **Translate with わいるどぱんち** from the right-click menu to open the popup and run automatically (when selected-text prefill is enabled).
 
 ## Custom base URL
