@@ -16,10 +16,10 @@ import type {
 let pendingSave = Promise.resolve();
 
 function serialize<T>(operation: () => Promise<T>): Promise<T> {
-  const result = pendingSave.then(() => {
+  const result = pendingSave.then(async (): Promise<T> => {
     // Popups, tabs, and the service worker share the extension's origin and lock.
     if (globalThis.navigator?.locks) {
-      return navigator.locks.request("wild:translation-history", operation);
+      return await navigator.locks.request("wild:translation-history", operation);
     }
     return operation();
   });
