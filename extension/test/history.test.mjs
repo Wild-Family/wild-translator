@@ -67,6 +67,34 @@ test("follow-ups update one entry, preserving its original input and creation da
   ]);
 });
 
+test("saving the same completion from the popup and background preserves dates and ordering", async (t) => {
+  const values = setup(t);
+  let now = 1000;
+  t.mock.method(Date, "now", () => now);
+  const request = { conversationId: "same", inputText: "hello" };
+  await saveTranslationHistory(request, prompt, "こんにちは");
+  const original = structuredClone(values.translationHistory[0]);
+  now = 2000;
+  await saveTranslationHistory({ conversationId: "newer", inputText: "bye" }, prompt, "さようなら");
+  now = 3000;
+  await saveTranslationHistory(request, prompt, "こんにちは");
+  assert.deepEqual(values.translationHistory.map((entry) => entry.id), ["newer", "same"]);
+  assert.deepEqual(values.translationHistory[1], original);
+});
+
+test("a late save of the first response cannot remove a completed follow-up", async (t) => {
+  const values = setup(t);
+  const request = { conversationId: "same", inputText: "hello" };
+  await saveTranslationHistory(request, prompt, "こんにちは");
+  const original = structuredClone(values.translationHistory[0]);
+  await saveTranslationHistory({
+    ...request, inputText: "Why?", history: original.messages,
+  }, prompt, "Explanation");
+  const continued = structuredClone(values.translationHistory[0]);
+  await saveTranslationHistory(request, prompt, "こんにちは");
+  assert.deepEqual(values.translationHistory, [continued]);
+});
+
 test("original input survives when an evicted conversation is continued", async (t) => {
   const values = setup(t);
   await saveTranslationHistory({

@@ -479,6 +479,58 @@ test("History recovers the existing saved translation without another API call",
   assert.deepEqual(popup.requests, []);
 });
 
+test("History opens saved entries even when an older background does not answer the history message", async (t) => {
+  const entry = historyEntry("existing", 1000);
+  const popup = await setup(t, { local: { translationHistory: [entry] } });
+  const sendMessage = popup.chrome.runtime.sendMessage;
+  popup.chrome.runtime.sendMessage = (message) => message.type === "LOAD_TRANSLATION_HISTORY"
+    ? Promise.resolve(undefined) : sendMessage(message);
+
+  await popup.openPopup();
+  await click(popup, "popup-history-button");
+  assert.equal(popup.element("popup-history-count").textContent, "1 / 50");
+  assert.match(popup.element("popup-history-list").textContent, /hello.*こんにちは/s);
+  assert.deepEqual(popup.requests, []);
+});
+
+test("completed translations are saved even when the background does not persist history", async (t) => {
+  const local = {};
+  const popup = await setup(t, { local, manualStream: true });
+  await popup.openPopup();
+  popup.type("popup-input", "hello");
+  await click(popup, "popup-run");
+  await finish(popup, "こんにちは");
+  assert.equal(local.translationHistory.length, 1);
+  assert.equal(local.translationHistory[0].inputText, "hello");
+  assert.equal(local.translationHistory[0].messages.at(-1).content, "こんにちは");
+});
+
+test("saved translations remain readable and recoverable while runtime messaging is unavailable", async (t) => {
+  const local = { popupDraft: { input: "hello", output: "こんにちは", promptId: "translate" } };
+  const popup = await setup(t, { local });
+  popup.chrome.runtime.sendMessage = async () => { throw new Error("Worker unavailable"); };
+  await popup.openPopup();
+  await click(popup, "popup-history-button");
+  assert.equal(popup.element("popup-history-count").textContent, "1 / 50");
+  assert.equal(local.translationHistory[0].inputText, "hello");
+  assert.deepEqual(popup.requests, []);
+});
+
+test("completed replies reach history before the display animation finishes", async (t) => {
+  const local = {};
+  const popup = await setup(t, { local, manualStream: true });
+  await popup.openPopup();
+  popup.type("popup-input", "hello");
+  await click(popup, "popup-run");
+  const response = "A".repeat(90);
+  await popup.respond({ type: "STREAM_DELTA", delta: response });
+  await popup.respond({ type: "STREAM_END" });
+  await delay(0);
+  assert.equal(local.translationHistory[0].messages.at(-1).content, response);
+  assert.equal(popup.element("popup-run").textContent, "Stop");
+  await popup.waitForIdle();
+});
+
 test("recovering an older response precedes replacing its draft with a new selection", async (t) => {
   const local = { popupDraft: {
     input: "Previous source", output: "Previous response", promptId: "translate",
@@ -513,12 +565,18 @@ test("history save warnings preserve the completed response and allow later reco
   await popup.openPopup();
   popup.type("popup-input", "hello");
   await click(popup, "popup-run");
+  const set = popup.chrome.storage.local.set;
+  popup.chrome.storage.local.set = async (items) => {
+    if ("translationHistory" in items) throw new Error("History storage is full");
+    await set(items);
+  };
   await popup.respond({ type: "STREAM_DELTA", delta: "こんにちは" });
   await popup.respond({ type: "STREAM_END", historyError: "History storage is full" });
   await popup.waitForIdle();
   assert.equal(popup.element("popup-output").textContent, "こんにちは");
-  assert.equal(popup.element("popup-error").textContent, "History storage is full");
+  assert.match(popup.element("popup-error").textContent, /history could not be saved.*History storage is full/);
   assert.equal(local.popupDraft.completed, true);
+  popup.chrome.storage.local.set = set;
   await click(popup, "popup-history-button");
   assert.equal(popup.element("popup-history-count").textContent, "1 / 50");
 });
@@ -584,7 +642,7 @@ test("reopening an entry restores its complete conversation and continues with i
   assert.deepEqual(popup.requests[0].history, entry.messages);
   assert.deepEqual(popup.requests[0].prompt, entry.prompt);
   await finish(popup, "New answer");
-  assert.equal(local.translationHistory[0].messages.length, 4);
+  assert.equal(local.translationHistory[0].messages.length, 6);
 });
 
 test("Back and Escape preserve the current draft and shortcuts do not run from History", async (t) => {

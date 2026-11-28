@@ -2,10 +2,11 @@ import { renderMarkdown } from "../app/markdown.js";
 import { restoreConversation } from "../app/conversation.js";
 import type { Conversation } from "../app/conversation.js";
 import { buildConversationMessages } from "../../../shared/src/conversation.js";
+import { HISTORY_LIMIT } from "../../../shared/src/history.js";
 import {
-  HISTORY_LIMIT,
-  restoreTranslationHistory,
-} from "../../../shared/src/history.js";
+  loadTranslationHistory,
+  saveTranslationHistory,
+} from "../../../shared/src/history-storage.js";
 import type { TranslationHistoryEntry } from "../../../shared/src/types.js";
 import type { PromptTemplate } from "../app/models.js";
 import { getAll, setAll } from "../app/storage.js";
@@ -330,11 +331,7 @@ async function showHistory(): Promise<void> {
 }
 
 async function loadHistory(): Promise<TranslationHistoryEntry[]> {
-  const response = await chrome.runtime.sendMessage({ type: "LOAD_TRANSLATION_HISTORY" });
-  if (!response?.ok) {
-    throw new Error(response?.error ?? "Close and reopen the extension to load history.");
-  }
-  return restoreTranslationHistory(response.entries);
+  return loadTranslationHistory(prompts, defaultPromptId);
 }
 
 function applyTheme(nextTheme: "light" | "dark"): void {
@@ -517,14 +514,26 @@ async function run(question?: string): Promise<void> {
           });
         }
         if (message?.type === "STREAM_END") {
-          void waitForStreamFlush().then(async () => {
+          if (activeRun?.token !== token) return;
+          const text = (currentReply()?.content ?? "") + streamQueue;
+          // Persist on completion, before the display animation finishes or the popup closes.
+          // Older background versions may finish a stream without saving its history.
+          const saved = text.trim() ? saveTranslationHistory({
+            inputText: requestInput,
+            history,
+            conversationId: nextConversation.id,
+            originalInputText: nextConversation.inputText,
+          }, prompt, text).then(() => "", (error) =>
+            `Translation finished, but its history could not be saved. ${formatError(error)}`,
+          ) : Promise.resolve("");
+          void Promise.all([waitForStreamFlush(), saved]).then(async ([, historyError]) => {
             if (activeRun?.token !== token) return;
             if (!currentReply()?.content.trim()) {
               settle(() => reject(new Error("No response received. Try again.")));
               return;
             }
             conversationCompleted = true;
-            if (message.historyError) setError(String(message.historyError));
+            if (historyError) setError(historyError);
             await saveDraftNow();
             runState.disconnectExpected = true;
             try {
